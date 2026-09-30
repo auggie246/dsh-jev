@@ -1,0 +1,11 @@
+# Loaded when the dsh-jev bundle is installed. Every Recipe is off until enabled here.
+- insert:
+    - id: dsh-jev
+      name: 'dsh-jev'
+      config:
+        recipes:
+          gate: false
+          skillHint: false
+          verify: false
+          injectionGuard: false
+          effortRouting: false
