@@ -34,6 +34,12 @@ OpenRouter Decisions instead: `baseUrl: https://openrouter.ai/api/alpha/decision
 
 Audit records append to `$DSH_HOME/dsh-jev/audit.jsonl` (default `~/.dsh/dsh-jev/`).
 
+## Installing and Recipe entries
+
+Verified in a copy of the `web` profile (`web-test`): build, then `dsh plugin --profile <name> add <path-to-this-repo>`. The bundle's `cordis.patch.yml` adds a `dsh-jev` row with every Recipe off, and the profile boots normally.
+
+One package can expose several loadable entries: a patch row named `dsh-jev/<entry>` (with a matching `exports` subpath) loaded and received its `config`. Recipe tickets (#4-#9) can therefore each ship as their own entry, for example `dsh-jev/gate`.
+
 ## Develop
 
 ```sh
