@@ -38,7 +38,11 @@ Audit records append to `$DSH_HOME/dsh-jev/audit.jsonl` (default `~/.dsh/dsh-jev
 
 Verified in a copy of the `web` profile (`web-test`): build, then `dsh plugin --profile <name> add <path-to-this-repo>`. The bundle's `cordis.patch.yml` adds a `dsh-jev` row with every Recipe off, and the profile boots normally.
 
-One package can expose several loadable entries: a patch row named `dsh-jev/<entry>` (with a matching `exports` subpath) loaded and received its `config`. Recipe tickets (#4-#9) can therefore each ship as their own entry, for example `dsh-jev/gate`.
+One package can expose several loadable entries: a patch row named `dsh-jev/<entry>` (with a matching `exports` subpath such as `"./gate": { "default": "./lib/gate.js" }` whose module exports `name`, `Config` and `apply`) loaded and received its `config`. A row whose subpath does not exist fails visibly ("did not activate ... failed to import"). Recipe tickets (#4-#9) can therefore each ship as their own entry, for example `dsh-jev/gate`.
+
+New rows must be added with an `- insert:` list in the bundle's `cordis.patch.yml` (or a profile patch). A bare `--patch` row only edits an existing id and is ignored with "entry not found" otherwise.
+
+Verified in `web-test`: with every Recipe off the profile boots with no errors and writes no audit file, and an invalid value (`recipes.gate: banana`) is rejected by the config schema (the entry does not activate; the rest of DSH still boots). The `web` profile serves a browser UI, so this was a boot check, not a headless task run.
 
 ## Develop
 
