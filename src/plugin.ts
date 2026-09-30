@@ -1,6 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { JEV_DEFAULTS } from './judge/jev.js'
+import { JsonlAuditSink } from './audit.js'
+import { JudgeCore } from './core.js'
+import { Gate, registerGate, type GateExec } from './gate.js'
+import { JEV_DEFAULTS, JevJudge } from './judge/jev.js'
 
 export const name = 'dsh-jev'
 
@@ -19,6 +22,10 @@ export interface Config {
     /** Name of the env var holding the API key (never the key itself). */
     apiKeyEnv?: string
     timeoutMs?: number
+  }
+  gate?: {
+    /** Both Noul answers must reach this to auto-approve. */
+    threshold?: number
   }
 }
 
@@ -40,12 +47,34 @@ export const Config: z<Config> = z.object({
       timeoutMs: z.number().default(JEV_DEFAULTS.timeoutMs),
     })
     .default({}),
+  gate: z.object({ threshold: z.number().min(0).max(1).default(0.9) }).default({}),
 }) as never
 
+/** Best effort: latest human task and cwd from the calling agent's session; empty when the shape is unfamiliar. */
+export function sessionContext(exec: GateExec): { task?: string; project?: string } {
+  try {
+    const session = (exec.agent as any)?.session
+    const cwd: unknown = session?.header?.cwd
+    const events: any[] = session?.snapshotEvents?.() ?? []
+    let task: string | undefined
+    for (const e of events) {
+      if (e?.type !== 'user/message' || e.data?.source?.kind !== 'user') continue
+      const text = (e.data.content as any[] | undefined)?.filter((b) => b?.type === 'text').map((b) => b.text).join('\n')
+      if (text) task = text
+    }
+    return { task, project: typeof cwd === 'string' ? cwd.split('/').filter(Boolean).pop() : undefined }
+  } catch {
+    return {}
+  }
+}
+
 /**
- * Plugin entry. Recipes (#4-#9) hook in here on the shared Judge core; with
- * every Recipe disabled this registers nothing, so DSH behaves as if absent.
+ * Plugin entry. Recipes hook in here on the shared Judge core; with every
+ * Recipe disabled this registers nothing, so DSH behaves as if absent.
  */
-export function apply(_ctx: Context, _config: Config): void {
-  // Intentionally empty until a Recipe is enabled.
+export function apply(ctx: Context, config: Config): void {
+  if (!config.recipes?.gate) return
+  const jev = { ...JEV_DEFAULTS, ...config.jev }
+  const core = new JudgeCore({ judge: new JevJudge(jev), audit: new JsonlAuditSink() })
+  registerGate(ctx as never, new Gate({ core, threshold: config.gate?.threshold, context: sessionContext }))
 }

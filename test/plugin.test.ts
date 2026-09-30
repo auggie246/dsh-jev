@@ -27,3 +27,16 @@ describe('plugin entry', () => {
     expect(cfg.recipes.gate).toBe(false)
   })
 })
+
+describe('gate wiring', () => {
+  it('registers exactly the two prepended listeners when the Gate is enabled', () => {
+    const reg: Array<[string, unknown]> = []
+    const ctx = { on: (e: string, _l: unknown, o: unknown) => reg.push([e, o]) }
+    apply(ctx as never, Config({ recipes: { gate: true } }) as never)
+    expect(reg).toEqual([['tools/pre-execute', { prepend: true }], ['approval/request', { prepend: true }]])
+  })
+
+  it('defaults the threshold to 0.9', () => {
+    expect((Config({}) as any).gate.threshold).toBe(0.9)
+  })
+})
