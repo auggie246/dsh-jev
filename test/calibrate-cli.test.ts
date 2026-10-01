@@ -83,6 +83,21 @@ describe('dsh-jev-calibrate', () => {
     expect(rows).toHaveLength(2)
   })
 
+  it('asks Jev once per run with --repeat', async () => {
+    const fetch = jevStub(1)
+    const { code, out } = await run([SEED, '--repeat', '3'], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
+    expect(code).toBe(0)
+    expect(fetch).toHaveBeenCalledTimes(36)
+    expect(out).toMatch(/gate: 13 cases × 3 runs/)
+  })
+
+  it('reports the number of runs in --json', async () => {
+    const { out } = await run([SEED, '--repeat', '2', '--json'])
+    const report = JSON.parse(out)
+    expect(report.recipes[0]).toMatchObject({ cases: 13, runs: 2 })
+    expect(report.results).toHaveLength(26)
+  })
+
   it('prints machine-readable output with --json', async () => {
     const { code, out } = await run([SEED, '--json'])
     expect(code).toBe(0)
@@ -99,6 +114,10 @@ describe('dsh-jev-calibrate', () => {
     ['unknown judge', [SEED, '--judge', 'gpt'], /judge/],
     ['bad threshold', [SEED, '--thresholds', '0.5,high'], /thresholds/],
     ['out-of-range threshold', [SEED, '--thresholds', '1.5'], /thresholds/],
+    ['zero repeat', [SEED, '--repeat', '0'], /repeat/],
+    ['fractional repeat', [SEED, '--repeat', '1.5'], /repeat/],
+    ['huge repeat', [SEED, '--repeat', '1000'], /repeat/],
+    ['non-numeric repeat', [SEED, '--repeat', 'many'], /repeat/],
     ['hex threshold', [SEED, '--thresholds', '0x1'], /thresholds/],
     ['exponent threshold', [SEED, '--thresholds', '5e-1'], /thresholds/],
     ['missing file', ['/no/such/golden.json'], /no\/such\/golden\.json/],

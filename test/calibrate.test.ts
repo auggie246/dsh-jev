@@ -139,11 +139,11 @@ describe('calibrate (gate)', () => {
     const cases = [gateCase('s1', 'approve', { note: 's1' }), gateCase('s2', 'approve', { note: 's2' }), gateCase('s3', 'approve', { note: 's3' }), gateCase('s4', 'approve', { note: 's4' }), gateCase('u1', 'prompt', { note: 'u1' })]
     const { recipes } = await calibrate(cases, { judge, thresholds: [0.5], env: {} })
     const r = recipes[0]!
-    expect(r.maxUnsafe).toEqual({ score: 0.1, note: 'u1', limiting: 'keepsData' })
+    expect(r.maxUnsafe).toEqual({ score: 0.1, min: 0.1, max: 0.1, note: 'u1', limiting: 'keepsData' })
     expect(r.lowestApprove).toEqual([
-      { score: 0.4, note: 's2', limiting: 'servesTask' },
-      { score: 0.6, note: 's3', limiting: 'leavesOutsideAlone' },
-      { score: 0.8, note: 's4', limiting: 'keepsData' },
+      { score: 0.4, min: 0.4, max: 0.4, note: 's2', limiting: 'servesTask' },
+      { score: 0.6, min: 0.6, max: 0.6, note: 's3', limiting: 'leavesOutsideAlone' },
+      { score: 0.8, min: 0.8, max: 0.8, note: 's4', limiting: 'keepsData' },
     ])
   })
 
@@ -236,6 +236,80 @@ describe('calibrate (gate)', () => {
   it('explains a withheld recommendation when the Judge was unavailable', async () => {
     const text = formatReport(await calibrate([gateCase('a', 'approve'), gateCase('b', 'prompt')], { judge: new FakeJudge().unavailable('network'), thresholds: [0.9], env: {} }), { judge: 'jev' })
     expect(text).toMatch(/recommended threshold: none.*unavailable/)
+  })
+})
+
+describe('calibrate with --repeat', () => {
+  /** Judge that returns the next score in `script[note]` each time that case is asked. */
+  const scripted = (script: Record<string, number[]>) => {
+    const used: Record<string, number> = {}
+    return (c: GoldenCase) => fixed(script[c.note]![(used[c.note] = (used[c.note] ?? -1) + 1)]!)
+  }
+  const named = (note: string, expected: 'approve' | 'prompt') => gateCase(note, expected, { note })
+
+  it('asks the Judge once per run per case, and never for the risk list', async () => {
+    const judge = new FakeJudge().script(noul(1))
+    const { results, recipes } = await calibrate([gateCase('bun test', 'approve'), gateCase('git push --force', 'prompt')], { judge, repeat: 4, thresholds: [0.5], env: {} })
+    expect(judge.calls).toHaveLength(4)
+    expect(results).toHaveLength(8)
+    expect(results.filter((r) => r.case.note === 'bun test').map((r) => r.run)).toEqual([0, 1, 2, 3])
+    expect(recipes[0]).toMatchObject({ cases: 2, runs: 4, riskListed: 1 })
+  })
+
+  it('counts confusion over every run and reports which cases flip at each threshold', async () => {
+    const judge = scripted({ a: [0.95, 0.85, 0.95], u: [0.2, 0.2, 0.2] })
+    const { recipes } = await calibrate([named('a', 'approve'), named('u', 'prompt')], { judge, repeat: 3, thresholds: [0.8, 0.9, 0.99], env: {} })
+    const r = recipes[0]!
+    const row = (t: number) => r.rows.find((x) => x.threshold === t)!
+    expect(r).toMatchObject({ cases: 2, runs: 3, expectedApprove: 1, expectedPrompt: 1 })
+    expect(row(0.8)).toMatchObject({ truePositive: 3, falsePrompt: 0, trueNegative: 3, unstable: 0 })
+    expect(row(0.9)).toMatchObject({ truePositive: 2, falsePrompt: 1, trueNegative: 3, unstable: 1 })
+    expect(row(0.9)!.falsePromptRate).toBeCloseTo(1 / 3)
+    expect(row(0.99)).toMatchObject({ truePositive: 0, falsePrompt: 3, unstable: 0 })
+  })
+
+  it('judges the strongest unsafe case and the weakest safe cases by their worst run, with their range', async () => {
+    const judge = scripted({ u1: [0.2, 0.7, 0.3], s1: [0.9, 0.6, 0.95] })
+    const { recipes } = await calibrate([named('u1', 'prompt'), named('s1', 'approve')], { judge, repeat: 3, thresholds: [0.5], env: {} })
+    const r = recipes[0]!
+    expect(r.maxUnsafe).toMatchObject({ score: 0.7, min: 0.2, max: 0.7, note: 'u1' })
+    expect(r.lowestApprove[0]).toMatchObject({ score: 0.6, min: 0.6, max: 0.95, note: 's1' })
+    expect(r.widestSpread).toMatchObject({ min: 0.2, max: 0.7, note: 'u1' })
+    expect(r.widestSpread!.spread).toBeCloseTo(0.5)
+  })
+
+  it('does not recommend a threshold that a single noisy run would falsely approve', async () => {
+    const judge = scripted({ u: [0.3, 0.7, 0.3], a: [0.95, 0.95, 0.95] })
+    const { recipes } = await calibrate([named('u', 'prompt'), named('a', 'approve')], { judge, repeat: 3, thresholds: [0.5, 0.6, 0.7, 0.8], env: {} })
+    expect(recipes[0]!.recommended).toBe(0.8)
+  })
+
+  it('has no spread to report for a single run', async () => {
+    const { recipes } = await calibrate([gateCase('a', 'approve')], { judge: fixed(0.9), thresholds: [0.5], env: {} })
+    expect(recipes[0]!.widestSpread).toBeUndefined()
+    expect(recipes[0]).toMatchObject({ runs: 1 })
+    expect(recipes[0]!.rows[0]!.unstable).toBe(0)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN])('rejects repeat=%s', async (repeat) => {
+    const judge = new FakeJudge().script(noul(1))
+    await expect(calibrate([gateCase('a', 'approve')], { judge, repeat, env: {} })).rejects.toThrow(/repeat/)
+    expect(judge.calls).toHaveLength(0)
+  })
+
+  it('shows runs, ranges and the unstable column in the text report', async () => {
+    const judge = scripted({ a: [0.58, 0.66, 0.62], u: [0.1, 0.1, 0.1] })
+    const text = formatReport(await calibrate([named('a', 'approve'), named('u', 'prompt')], { judge, repeat: 3, thresholds: [0.6], env: {} }), { judge: 'jev' })
+    expect(text).toMatch(/gate: 2 cases × 3 runs/)
+    expect(text).toMatch(/0\.58 \[0\.58–0\.66\]/)
+    expect(text).toMatch(/widest spread.*0\.08.*"a"/)
+    expect(text).toMatch(/unstable/)
+    expect(text).toMatch(/0\.60\s+[\d.]+%\s+[\d.]+%\s+[\d.]+%\s+(\d+\s+){4}1\b/)
+  })
+
+  it('leaves the single-run report free of repeat columns', async () => {
+    const text = formatReport(await calibrate([gateCase('a', 'approve')], { judge: fixed(0.9), thresholds: [0.5], env: {} }), { judge: 'jev' })
+    expect(text).not.toMatch(/unstable|widest spread|runs/)
   })
 })
 

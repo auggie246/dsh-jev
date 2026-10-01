@@ -15,10 +15,13 @@ export interface CliIo {
   readFile: (path: string) => Promise<string>
 }
 
+const MAX_REPEAT = 100
+
 const USAGE = `usage: dsh-jev-calibrate <golden.json> [options]
 
   --judge auto|fake|jev   auto (default) uses Jev when its key is in the environment, else the offline fake
   --thresholds a,b,c      thresholds to report (default 0.5,0.6,0.7,0.75,0.8,0.85,0.9,0.95,0.99)
+  --repeat N              replay every case N times (1-100, default 1) to show how far scores vary between runs
   --json                  print the full report, including every case, as JSON
   --base-url URL          Jev endpoint (default ${JEV_DEFAULTS.baseUrl})
   --model NAME            Jev model (default ${JEV_DEFAULTS.model})
@@ -60,6 +63,8 @@ export async function main(argv: string[], overrides: Partial<CliIo> = {}): Prom
     thresholds = values.thresholds.split(',').map((s) => (/^\d*\.?\d+$/.test(s.trim()) ? Number(s) : Number.NaN))
     if (thresholds.some((t) => !(t >= 0 && t <= 1))) return fail('--thresholds must be comma-separated numbers between 0 and 1')
   }
+  const repeat = values.repeat === undefined ? 1 : /^\d+$/.test(values.repeat) ? Number(values.repeat) : Number.NaN
+  if (!(repeat >= 1 && repeat <= MAX_REPEAT)) return fail(`--repeat must be a whole number from 1 to ${MAX_REPEAT}`)
   const timeoutMs = values['timeout-ms'] === undefined ? JEV_DEFAULTS.timeoutMs : Number(values['timeout-ms'])
   if (!(timeoutMs > 0)) return fail('--timeout-ms must be a positive number')
 
@@ -81,7 +86,7 @@ export async function main(argv: string[], overrides: Partial<CliIo> = {}): Prom
     : fakeJudgeFor
   const label = useJev ? 'jev' : 'fake'
   // The report goes to stdout only; the run never touches the audit file.
-  const report = await calibrate(cases, { judge, thresholds, env: io.env })
+  const report = await calibrate(cases, { judge, thresholds, repeat, env: io.env })
   io.stdout(values.json ? `${JSON.stringify({ judge: label, ...report }, null, 2)}\n` : formatReport(report, { judge: label }))
   return 0
 }
@@ -89,6 +94,7 @@ export async function main(argv: string[], overrides: Partial<CliIo> = {}): Prom
 const OPTIONS = {
   judge: { type: 'string' },
   thresholds: { type: 'string' },
+  repeat: { type: 'string' },
   json: { type: 'boolean' },
   'base-url': { type: 'string' },
   model: { type: 'string' },
