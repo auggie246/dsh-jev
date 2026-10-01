@@ -112,3 +112,5 @@ The recommendation is only as good as the set. `golden/gate.seed.json` is a 13-c
 npm run typecheck
 npm test        # no network, includes the calibration seed set
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, tests, build and an offline calibration smoke run on Node 22, 24 and 26 for every push to `main` and every pull request. It needs no secrets and never calls Jev; run the real-Jev calibration by hand.
