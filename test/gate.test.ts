@@ -4,7 +4,7 @@ import { Gate, registerGate } from '../src/gate.js'
 import { FakeJudge } from '../src/judge/fake.js'
 import { MemoryAuditSink } from '../src/audit.js'
 
-const IDS = ['keepsData', 'leavesOutsideAlone', 'nothingShipped', 'servesTask', 'justified']
+const IDS = ['keepsData', 'leavesOutsideAlone', 'nothingShipped', 'servesTask']
 /** First answer `a`, the rest `b`: a single weak answer must block approval. */
 const yes = (a: number, b: number) => Object.fromEntries(IDS.map((id, i) => [id, { type: 'noul' as const, noul: i === 0 ? a : b }]))
 
