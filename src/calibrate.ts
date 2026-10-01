@@ -3,9 +3,10 @@
  * how often the Recipe would skip the prompt and how often that is right, so thresholds come from data.
  */
 import { JudgeCore } from './core.js'
-import { gateJudgment, gateScore, GATED_TOOLS } from './gate.js'
+import { gateJudgment, gateScore, gateScripts, GATED_TOOLS, type GateCallContext } from './gate.js'
 import type { Judge, JudgeUnavailable } from './judge/types.js'
 import { assessCall } from './risk.js'
+import { assessScripts, type Scripts } from './scripts.js'
 
 /** `approve`: the Recipe should skip the prompt. `prompt`: DSH's normal prompt should stay. */
 export type Expected = 'approve' | 'prompt'
@@ -29,21 +30,33 @@ export type Observation =
   | { kind: 'scored'; score: number; answers: Record<string, number>; limiting: string; latencyMs: number }
   | { kind: 'unavailable'; reason: JudgeUnavailable['reason']; latencyMs: number }
 
+/** Recipe config a replay must match to send what the live Recipe sends. */
+interface ReplayOptions {
+  sendScripts: boolean
+}
+
 /** What a Recipe contributes to calibration: a state parser and one observation per case. */
 interface RecipeAdapter<S = any> {
   parse(state: unknown): S
-  observe(core: JudgeCore, state: S): Promise<Observation>
+  observe(core: JudgeCore, state: S, opts: ReplayOptions): Promise<Observation>
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
-/** Gate state: `{ tool?: 'bash' | ..., arguments: { command, ... }, task?, project? }`, the call as DSH would see it. */
+/**
+ * Gate state: `{ tool?: 'bash' | ..., arguments: { command, ... }, task?, project?, scripts? }`, the call as DSH would see it.
+ * `scripts` stands in for the project's package.json `scripts`, so Script bodies replay as the live Gate reads them.
+ */
 interface GateState {
   tool: string
   arguments: Record<string, unknown>
   task?: string
   project?: string
+  scripts?: Scripts
 }
+
+/** Where a case's `scripts` sit; any absolute path works, since the replay's package.json is the same everywhere. */
+const REPLAY_ROOT = '/project'
 
 const gateAdapter: RecipeAdapter<GateState> = {
   parse(state) {
@@ -55,13 +68,21 @@ const gateAdapter: RecipeAdapter<GateState> = {
       throw new Error('state.arguments.command must be a non-empty string')
     }
     for (const k of ['task', 'project'] as const) if (state[k] !== undefined && typeof state[k] !== 'string') throw new Error(`state.${k} must be a string`)
-    return { tool, arguments: state.arguments, task: state.task as string | undefined, project: state.project as string | undefined }
+    if (state.scripts !== undefined) {
+      if (!isObj(state.scripts)) throw new Error('state.scripts must be an object of script name to body')
+      for (const [name, body] of Object.entries(state.scripts)) if (typeof body !== 'string') throw new Error(`state.scripts.${name} must be a string`)
+    }
+    return { tool, arguments: state.arguments, task: state.task as string | undefined, project: state.project as string | undefined, scripts: state.scripts as Scripts | undefined }
   },
-  async observe(core, { tool, arguments: args, task, project }) {
-    // Same order as the live Gate: the static risk list first, then the Judge.
+  async observe(core, { tool, arguments: args, task, project, scripts }, { sendScripts }) {
+    // Same order as the live Gate: the static risk list over the call, then over its Script bodies, then the Judge.
     const risk = assessCall(tool, args)
     if (risk.risky) return { kind: 'risk-list', reason: risk.reason ?? 'risky' }
-    const { result } = await core.ask(gateJudgment(tool, args, { task, project }))
+    const ctx: GateCallContext = { task, project, ...(scripts ? { projectDir: REPLAY_ROOT } : {}) }
+    const bodies = await gateScripts(tool, args, ctx, async () => ({ root: REPLAY_ROOT, scripts: scripts ?? {} }))
+    const scriptRisk = assessScripts(bodies)
+    if (scriptRisk.risky) return { kind: 'risk-list', reason: scriptRisk.reason ?? 'risky' }
+    const { result } = await core.ask(gateJudgment(tool, args, ctx, sendScripts ? bodies : []))
     if (result.status === 'unavailable') return { kind: 'unavailable', reason: result.reason, latencyMs: result.latencyMs }
     const score = gateScore(result.answers)
     if (score === undefined) return { kind: 'unavailable', reason: 'missing-answer', latencyMs: result.latencyMs }
@@ -201,6 +222,8 @@ export interface CalibrateOptions {
   repeat?: number
   /** Env scanned for secrets by the Egress rule; defaults to process.env. */
   env?: Record<string, string | undefined>
+  /** Replay as a Gate with `gate.sendScripts` on: cases' Script bodies are sent as a `scripts` field. Default false, like the plugin. */
+  sendScripts?: boolean
 }
 
 const LOWEST_SHOWN = 3
@@ -226,7 +249,7 @@ export async function calibrate(cases: GoldenCase[], opts: CalibrateOptions): Pr
     for (let run = 0; run < repeat; run++) {
       const judge = typeof opts.judge === 'function' ? opts.judge(c) : opts.judge
       const core = new JudgeCore({ judge, audit: NO_AUDIT, env: opts.env })
-      results.push({ case: c, index, run, observation: await adapter.observe(core, state) })
+      results.push({ case: c, index, run, observation: await adapter.observe(core, state, { sendScripts: opts.sendScripts ?? false }) })
     }
   }
 

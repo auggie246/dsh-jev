@@ -125,6 +125,9 @@ function parse(input: string): Parsed | undefined {
   return { segments }
 }
 
+/** Unquoted words of each command in a line, split at every operator; `undefined` when the line cannot be parsed safely. */
+export const commandSegments = (command: string): string[][] | undefined => parse(command)?.segments
+
 const basename = (p: string) => p.replace(/\\/g, '/').split('/').pop() ?? p
 const isAssignment = (w: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)
 

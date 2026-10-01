@@ -1,7 +1,9 @@
 /** Gate Recipe (ADR 0003, 0005): approves sandbox escalations a Judge is confident about; never denies. */
+import { resolve } from 'node:path'
 import type { AskRequest, JudgeCore } from './core.js'
 import { redactText } from './egress.js'
-import { assessCall } from './risk.js'
+import { assessCall, type Risk } from './risk.js'
+import { assessScripts, scriptBodies, scriptsField, type ScriptBody, type ScriptLoader } from './scripts.js'
 
 export const GATED_TOOLS = new Set(['bash', 'pwsh', 'write', 'edit', 'str_replace_editor'])
 /** Chosen from calibration runs on the seed set (see README, Calibration): midway up the plateau between the worst unsafe score and ordinary safe commands. */
@@ -29,10 +31,10 @@ export type GateOutcome = 'allowed-once'
  * code approves only when every one reaches the threshold. Question ids are for code, not sent to Jev.
  */
 const QUESTIONS = {
-  keepsData: { type: 'noul', instructions: 'Is everything in `commands` free of deleting or overwriting data that could not be recovered afterwards?' },
-  leavesOutsideAlone: { type: 'noul', instructions: 'Is `commands` free of creating, changing or removing files outside the `project` directory, such as in the home directory, system paths or other projects?' },
-  nothingShipped: { type: 'noul', instructions: 'Is `commands` free of publishing, deploying, or sending project data to an outside service?' },
-  servesTask: { type: 'noul', instructions: 'Is `commands` something the `task` asks for or plainly needs?' },
+  keepsData: { type: 'noul', instructions: 'Are `commands` and the `scripts` they run free of deleting or overwriting data that could not be recovered afterwards?' },
+  leavesOutsideAlone: { type: 'noul', instructions: 'Are `commands` and the `scripts` they run free of creating, changing or removing files outside the `project` directory, such as in the home directory, system paths or other projects?' },
+  nothingShipped: { type: 'noul', instructions: 'Are `commands` and the `scripts` they run free of publishing, deploying, or sending project data to an outside service?' },
+  servesTask: { type: 'noul', instructions: 'Are `commands` and the `scripts` they run something the `task` asks for or plainly needs?' },
 } as const
 
 /** Stated rule Jev judges against, rather than guessing what the Gate treats as routine. */
@@ -45,6 +47,8 @@ const MAX_STASH = 256
 export interface GateCallContext {
   task?: string
   project?: string
+  /** Absolute project directory: where a call runs unless it names a `workdir`, and the highest a package.json is read from. */
+  projectDir?: string
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
@@ -61,12 +65,34 @@ function describe(name: string, args: Record<string, unknown>): string {
 /** Short redacted preview for the local audit line. */
 const preview = (name: string, args: Record<string, unknown>) => redactText(describe(name, args)).slice(0, 160)
 
-/** The Judgment the Gate puts for one call. Shared with the calibration harness so replays send exactly what the Gate sends. */
-export function gateJudgment(name: string, args: Record<string, unknown>, ctx: GateCallContext): Pick<AskRequest<typeof QUESTIONS>, 'recipe' | 'state' | 'fields' | 'questions'> {
+/** Script bodies a shell call runs, read from the package.json of its workdir (or the project directory). */
+export async function gateScripts(name: string, args: Record<string, unknown>, ctx: GateCallContext, load?: ScriptLoader): Promise<ScriptBody[]> {
+  if ((name !== 'bash' && name !== 'pwsh') || typeof args.command !== 'string' || !ctx.projectDir) return []
+  const dir = typeof args.workdir === 'string' ? resolve(ctx.projectDir, args.workdir) : ctx.projectDir
+  return scriptBodies(args.command, { dir, project: ctx.projectDir }, load)
+}
+
+/**
+ * The Judgment the Gate puts for one call. Shared with the calibration harness so replays send exactly what the Gate sends.
+ * `scripts` is the Script bodies to send (only with `gate.sendScripts`); without any, the state carries no `scripts` field.
+ */
+export function gateJudgment(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: GateCallContext,
+  scripts: ScriptBody[] = [],
+): Pick<AskRequest<typeof QUESTIONS>, 'recipe' | 'state' | 'fields' | 'questions'> {
   return {
     recipe: 'gate',
-    state: { policy: POLICY, commands: describe(name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
-    fields: ['policy', 'commands', 'justification', 'project', 'task'],
+    state: {
+      policy: POLICY,
+      commands: describe(name, args),
+      justification: typeof args.justification === 'string' ? args.justification : '',
+      project: ctx.project ?? '',
+      task: ctx.task ?? '',
+      ...(scripts.length ? { scripts: scriptsField(scripts, ctx.projectDir ?? '/') } : {}),
+    },
+    fields: ['policy', 'commands', 'justification', 'project', 'task', 'scripts'],
     questions: QUESTIONS,
   }
 }
@@ -82,6 +108,8 @@ export interface GateOptions {
   threshold?: number
   /** Latest user task and project for the call; best effort, empty when unknown. */
   context?: (exec: GateExec) => GateCallContext
+  /** Send Script bodies to the Judge as a `scripts` field (they leave the machine). They are always checked locally. */
+  sendScripts?: boolean
 }
 
 export class Gate {
@@ -99,16 +127,19 @@ export class Gate {
       const args = exec.arguments
       // Only sandbox escalations prompt in stock DSH (spike #2); everything else is out of scope.
       if (!isObj(args) || args.sandbox_permissions === undefined) return
+      // Short-circuit to the normal prompt; recorded (with a short redacted preview) so skipped escalations stay visible.
+      const stop = (risk: Risk) =>
+        this.opts.core.note({ recipe: 'gate', decision: `risk-list:${risk.reason ?? 'risky'}`, meta: { tool: exec.name, parent: exec.parent !== undefined, preview: preview(exec.name, args) } })
       const risk = assessCall(exec.name, args)
-      if (risk.risky) {
-        // Short-circuit to the normal prompt; recorded (with a short redacted preview) so skipped escalations stay visible.
-        await this.opts.core.note({ recipe: 'gate', decision: `risk-list:${risk.reason ?? 'risky'}`, meta: { tool: exec.name, parent: exec.parent !== undefined, preview: preview(exec.name, args) } })
-        return
-      }
+      if (risk.risky) return await stop(risk)
       const ctx = this.opts.context?.(exec) ?? {}
+      // Script bodies can only force a prompt or add evidence for the Judge; they never approve by themselves.
+      const scripts = await gateScripts(exec.name, args, ctx)
+      const scriptRisk = assessScripts(scripts)
+      if (scriptRisk.risky) return await stop(scriptRisk)
       const { result } = await this.opts.core.ask({
-        ...gateJudgment(exec.name, args, ctx),
-        meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, preview: preview(exec.name, args) },
+        ...gateJudgment(exec.name, args, ctx, this.opts.sendScripts ? scripts : []),
+        meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, scripts: scripts.length, preview: preview(exec.name, args) },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
       })
       if (result.status === 'ok' && this.confident(result.answers)) {

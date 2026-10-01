@@ -26,7 +26,7 @@ describe('dsh-jev-calibrate', () => {
     expect(code).toBe(0)
     expect(fetch).not.toHaveBeenCalled()
     expect(out).toContain('judge: fake')
-    expect(out).toMatch(/gate: 14 cases/)
+    expect(out).toMatch(/gate: 16 cases/)
     expect(out).toMatch(/recommended threshold at zero false-approves: 0\.85/)
   })
 
@@ -43,11 +43,21 @@ describe('dsh-jev-calibrate', () => {
     const { code, out } = await run([SEED], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
     expect(code).toBe(0)
     expect(out).toContain('judge: jev')
-    // 13 cases, one stopped by the risk list before any Judgment.
-    expect(fetch).toHaveBeenCalledTimes(12)
+    // 16 cases, three stopped by the risk list before any Judgment.
+    expect(fetch).toHaveBeenCalledTimes(13)
     expect(fetch.mock.calls[0]![0]).toBe('https://api.typesafe.ai/v1/systemone')
     // Everything scored 1, so every should-prompt case is falsely approved at every threshold.
     expect(out).toMatch(/recommended threshold: none/)
+  })
+
+  it('sends Script bodies to Jev only with --send-scripts', async () => {
+    const sent = async (args: string[]) => {
+      const fetch = jevStub(1)
+      await run([SEED, ...args], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
+      return fetch.mock.calls.map((c) => String((c[1] as RequestInit).body)).filter((b) => b.includes('vitest run'))
+    }
+    expect(await sent([])).toEqual([])
+    expect(await sent(['--send-scripts'])).toHaveLength(1)
   })
 
   it('does not call Jev when --judge fake is forced, even with a key', async () => {
@@ -74,7 +84,7 @@ describe('dsh-jev-calibrate', () => {
   it('counts an unreachable Jev as unavailable rather than failing the run', async () => {
     const { code, out } = await run([SEED, '--judge', 'jev'], { env: { TYPESAFE_API_KEY: 'k-123456789' } })
     expect(code).toBe(0)
-    expect(out).toMatch(/12 Judge unavailable/)
+    expect(out).toMatch(/13 Judge unavailable/)
   })
 
   it('limits the table to --thresholds', async () => {
@@ -87,15 +97,15 @@ describe('dsh-jev-calibrate', () => {
     const fetch = jevStub(1)
     const { code, out } = await run([SEED, '--repeat', '3'], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
     expect(code).toBe(0)
-    expect(fetch).toHaveBeenCalledTimes(36)
-    expect(out).toMatch(/gate: 14 cases × 3 runs/)
+    expect(fetch).toHaveBeenCalledTimes(39)
+    expect(out).toMatch(/gate: 16 cases × 3 runs/)
   })
 
   it('reports the number of runs in --json', async () => {
     const { out } = await run([SEED, '--repeat', '2', '--json'])
     const report = JSON.parse(out)
-    expect(report.recipes[0]).toMatchObject({ cases: 14, runs: 2 })
-    expect(report.results).toHaveLength(28)
+    expect(report.recipes[0]).toMatchObject({ cases: 16, runs: 2 })
+    expect(report.results).toHaveLength(32)
   })
 
   it('prints machine-readable output with --json', async () => {
@@ -103,8 +113,8 @@ describe('dsh-jev-calibrate', () => {
     expect(code).toBe(0)
     const report = JSON.parse(out)
     expect(report.judge).toBe('fake')
-    expect(report.recipes[0]).toMatchObject({ recipe: 'gate', cases: 14, recommended: 0.85 })
-    expect(report.results).toHaveLength(14)
+    expect(report.recipes[0]).toMatchObject({ recipe: 'gate', cases: 16, recommended: 0.85 })
+    expect(report.results).toHaveLength(16)
   })
 
   it.each([

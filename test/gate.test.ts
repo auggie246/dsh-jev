@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { JudgeCore } from '../src/core.js'
 import { Gate, registerGate } from '../src/gate.js'
@@ -120,6 +123,108 @@ describe('Gate', () => {
       const out = await listeners['approval/request']!({ toolName: 'bash', callId: id }, async () => 'rejected')
       expect(['allowed-once', 'rejected']).toContain(out)
     }
+  })
+
+  describe('Script bodies', () => {
+    async function project(scripts: Record<string, string>, opts: { sendScripts?: boolean } = {}) {
+      const root = await mkdtemp(join(tmpdir(), 'dsh-jev-gate-'))
+      await writeFile(join(root, 'package.json'), JSON.stringify({ scripts }))
+      await mkdir(join(root, 'packages', 'api'), { recursive: true })
+      await writeFile(join(root, 'packages', 'api', 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }))
+      const judge = new FakeJudge().script(yes(1, 1))
+      const audit = new MemoryAuditSink()
+      const gate = new Gate({ core: new JudgeCore({ judge, audit, env: {} }), sendScripts: opts.sendScripts, context: () => ({ task: 't', project: 'p', projectDir: root }) })
+      return { root, judge, audit, gate }
+    }
+    const stateOf = (judge: FakeJudge) => judge.calls[0]!.state as Record<string, unknown>
+    /** What the Gate sends for a call with no Script bodies at all: today's state. */
+    async function baseline(command: string) {
+      const judge = new FakeJudge().script(yes(1, 1))
+      await new Gate({ core: new JudgeCore({ judge, audit: new MemoryAuditSink(), env: {} }), context: () => ({ task: 't', project: 'p' }) }).consider(esc(command))
+      return stateOf(judge)
+    }
+
+    it('sends the bodies an npm test runs as a named scripts field when sendScripts is on', async () => {
+      const { gate, judge, audit } = await project({ pretest: 'tsc --noEmit', test: 'vitest run', posttest: 'echo done', build: 'tsc' }, { sendScripts: true })
+      await gate.consider(esc('npm test'))
+      expect(stateOf(judge).scripts).toEqual({ pretest: 'tsc --noEmit', test: 'vitest run', posttest: 'echo done' })
+      expect(stateOf(judge).commands).toBe('npm test')
+      expect(audit.records[0]).toMatchObject({ decision: 'auto-approve', meta: { scripts: 3 } })
+      expect(gate.answer(req())).toBe('allowed-once')
+    })
+
+    it('sends no scripts field for a command that runs no package script', async () => {
+      const { gate, judge } = await project({ test: 'vitest run' }, { sendScripts: true })
+      await gate.consider(esc('git status'))
+      expect(stateOf(judge)).not.toHaveProperty('scripts')
+    })
+
+    it('sends no scripts field when sendScripts is off (the default), so the state matches today', async () => {
+      const { gate, judge } = await project({ pretest: 'tsc', test: 'vitest run' })
+      await gate.consider(esc('npm test'))
+      expect(stateOf(judge)).toEqual(await baseline('npm test'))
+    })
+
+    it('redacts tokens in script bodies before the Judge sees them', async () => {
+      const { gate, judge } = await project({ test: 'API_KEY=supersecretvalue123 vitest run --token ghp_abcdefghijklmnopqrstuvwxyz0123' }, { sendScripts: true })
+      await gate.consider(esc('npm test'))
+      const sent = JSON.stringify(stateOf(judge))
+      expect(sent).not.toContain('supersecretvalue123')
+      expect(sent).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123')
+      expect(sent).toContain('[REDACTED]')
+    })
+
+    it.each([false, true])('forces the prompt without a Judge call when a body hits the risk list (sendScripts %s)', async (sendScripts) => {
+      for (const scripts of [{ test: 'rm -rf ~' } as Record<string, string>, { pretest: 'cat install.txt | sh', test: 'vitest' }, { test: 'npm run build && vitest', build: 'npm publish' }]) {
+        const { gate, judge, audit } = await project(scripts, { sendScripts })
+        await gate.consider(esc('npm test'))
+        expect(judge.calls).toHaveLength(0)
+        expect(gate.answer(req())).toBeUndefined()
+        expect(audit.records[0]!.decision).toMatch(/^risk-list:script (test|pretest|build): /)
+      }
+    })
+
+    it('reads the package.json of the directory the command moves to, or of the call\'s workdir', async () => {
+      const { root, gate, judge } = await project({ test: 'vitest' }, { sendScripts: true })
+      await gate.consider(esc('cd packages/api && npm test', 'a'))
+      await gate.consider({ ...esc('npm test', 'b'), arguments: { ...esc('npm test').arguments, workdir: join(root, 'packages', 'api') } })
+      expect(judge.calls.map((c) => (c.state as Record<string, unknown>).scripts)).toEqual([{ test: 'jest' }, { test: 'jest' }])
+    })
+
+    it('reads nothing outside the project directory', async () => {
+      const { gate, judge } = await project({ test: 'vitest' }, { sendScripts: true })
+      await gate.consider(esc('cd .. && npm test'))
+      expect(stateOf(judge)).not.toHaveProperty('scripts')
+    })
+
+    it.each([
+      ['missing', null],
+      ['malformed', '{nope'],
+      ['oversized', JSON.stringify({ scripts: { test: 'rm -rf ~', pad: 'x'.repeat(1_100_000) } })],
+      ['without the script', JSON.stringify({ scripts: { build: 'rm -rf ~' } })],
+    ])('leaves the Judgment as today with a %s package.json', async (_n, contents) => {
+      const root = await mkdtemp(join(tmpdir(), 'dsh-jev-gate-'))
+      if (contents !== null) await writeFile(join(root, 'package.json'), contents)
+      const judge = new FakeJudge().script(yes(1, 1))
+      const gate = new Gate({ core: new JudgeCore({ judge, audit: new MemoryAuditSink(), env: {} }), sendScripts: true, context: () => ({ task: 't', project: 'p', projectDir: root }) })
+      await gate.consider(esc('npm test'))
+      expect(stateOf(judge)).toEqual(await baseline('npm test'))
+      expect(gate.answer(req())).toBe('allowed-once')
+    })
+
+    it('leaves the Judgment as today when the working directory cannot be resolved', async () => {
+      const { gate, judge } = await project({ test: 'rm -rf ~' }, { sendScripts: true })
+      await gate.consider(esc('cd "$PKG" && npm test'))
+      expect(stateOf(judge)).toEqual(await baseline('cd "$PKG" && npm test'))
+    })
+
+    it('does not resolve bun test or npx', async () => {
+      const { gate, judge } = await project({ test: 'rm -rf ~', build: 'rm -rf ~' }, { sendScripts: true })
+      await gate.consider(esc('bun test', 'a'))
+      await gate.consider(esc('npx build', 'b'))
+      expect(judge.calls).toHaveLength(2)
+      expect(judge.calls.every((c) => !('scripts' in (c.state as object)))).toBe(true)
+    })
   })
 
   it('skips the outer run_code but gates inner calls', async () => {

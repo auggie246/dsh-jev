@@ -45,6 +45,11 @@ describe('gate wiring', () => {
     expect((Config({}) as any).gate.threshold).toBe(0.8)
     expect((Config({}) as any).gate.threshold).toBe(DEFAULT_THRESHOLD)
   })
+
+  it('keeps Script bodies on the machine unless gate.sendScripts is set', () => {
+    expect((Config({}) as any).gate.sendScripts).toBe(false)
+    expect((Config({ gate: { sendScripts: true } }) as any).gate.sendScripts).toBe(true)
+  })
 })
 
 describe('sessionContext', () => {
@@ -53,7 +58,7 @@ describe('sessionContext', () => {
 
   it('keeps the last three human messages so a short follow-up does not hide the task', () => {
     const ctx = sessionContext(exec([msg('one'), msg('Run the whole test suite'), msg('tool', 'tool'), msg('yes'), msg('go ahead')]) as never)
-    expect(ctx).toEqual({ task: 'Run the whole test suite\n---\nyes\n---\ngo ahead', project: 'proj' })
+    expect(ctx).toEqual({ task: 'Run the whole test suite\n---\nyes\n---\ngo ahead', project: 'proj', projectDir: '/a/b/proj' })
   })
 
   it('returns an empty context for an unfamiliar session shape', () => {

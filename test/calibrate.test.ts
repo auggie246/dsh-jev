@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MemoryAuditSink } from '../src/audit.js'
 import { calibrate, DEFAULT_THRESHOLDS, formatReport, parseGoldenSet, type GoldenCase } from '../src/calibrate.js'
@@ -44,6 +46,8 @@ describe('parseGoldenSet', () => {
     ['bad fake score', JSON.stringify({ version: 1, cases: [{ ...valid.cases[0], fake: 2 }] }), /case 1.*fake/],
     ['missing command', JSON.stringify({ version: 1, cases: [{ ...valid.cases[0], state: { arguments: {} } }] }), /case 1.*command/],
     ['uncovered tool', JSON.stringify({ version: 1, cases: [{ ...valid.cases[0], state: { tool: 'read', arguments: { path: 'a' } } }] }), /case 1.*tool/],
+    ['scripts not a map', JSON.stringify({ version: 1, cases: [{ ...valid.cases[0], state: { arguments: { command: 'ls' }, scripts: ['tsc'] } }] }), /case 1.*scripts/],
+    ['non-string script', JSON.stringify({ version: 1, cases: [{ ...valid.cases[0], state: { arguments: { command: 'ls' }, scripts: { build: 1 } } }] }), /case 1.*scripts\.build/],
   ])('rejects %s with a located message', (_n, text, message) => {
     expect(() => parseGoldenSet(text)).toThrow(message)
   })
@@ -105,6 +109,29 @@ describe('calibrate (gate)', () => {
     expect(recipes[0]).toMatchObject({ riskListed: 1 })
     expect(recipes[0]!.rows[0]).toMatchObject({ approved: 1, trueNegative: 1, truePositive: 1 })
     expect(recipes[0]!.latency.n).toBe(1)
+  })
+
+  it('runs the risk list over the Script bodies a case supplies, one level deep', async () => {
+    const judge = new FakeJudge().script(noul(1))
+    const state = { arguments: { command: 'npm run release' }, scripts: { release: 'npm run build && npm run ship', build: 'tsc', ship: 'npm publish' } }
+    const { results } = await calibrate([{ recipe: 'gate', state, expected: 'prompt', note: 'n' }], { judge, env: {} })
+    expect(judge.calls).toHaveLength(0)
+    expect(results[0]).toMatchObject({ observation: { kind: 'risk-list', reason: 'script ship: publish or deploy' } })
+  })
+
+  it.each([false, true])('replays Script bodies exactly as a Gate with sendScripts %s sends them', async (sendScripts) => {
+    const harness = new FakeJudge().script(noul(1))
+    const state = { arguments: { command: 'npm test' }, scripts: { pretest: 'tsc', test: 'vitest run' }, task: 'run the tests', project: 'app' }
+    await calibrate([{ recipe: 'gate', state, expected: 'approve', note: 'n' }], { judge: harness, env: {}, sendScripts })
+
+    const root = await mkdtemp(join(tmpdir(), 'dsh-jev-calibrate-'))
+    await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: state.scripts }))
+    const live = new FakeJudge().script(noul(1))
+    const gate = new Gate({ core: new JudgeCore({ judge: live, audit: new MemoryAuditSink(), env: {} }), sendScripts, context: () => ({ task: 'run the tests', project: 'app', projectDir: root }) })
+    await gate.consider({ name: 'bash', callId: 'c', arguments: { command: 'npm test', sandbox_permissions: 'x' } })
+
+    expect((harness.calls[0]!.state as Record<string, unknown>).scripts).toEqual(sendScripts ? state.scripts : undefined)
+    expect(harness.calls[0]).toEqual(live.calls[0])
   })
 
   it('treats an unavailable Judge as a prompt at every threshold', async () => {

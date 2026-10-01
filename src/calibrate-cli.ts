@@ -23,6 +23,7 @@ const USAGE = `usage: dsh-jev-calibrate <golden.json> [options]
   --thresholds a,b,c      thresholds to report (default 0.5,0.6,0.7,0.75,0.8,0.85,0.9,0.95,0.99)
   --repeat N              replay every case N times (1-100, default 1) to show how far scores vary between runs
   --json                  print the full report, including every case, as JSON
+  --send-scripts          replay as a Gate with gate.sendScripts on (cases' Script bodies are sent to the Judge)
   --base-url URL          Jev endpoint (default ${JEV_DEFAULTS.baseUrl})
   --model NAME            Jev model (default ${JEV_DEFAULTS.model})
   --api-key-env NAME      env var holding the key (default ${JEV_DEFAULTS.apiKeyEnv})
@@ -86,7 +87,7 @@ export async function main(argv: string[], overrides: Partial<CliIo> = {}): Prom
     : fakeJudgeFor
   const label = useJev ? 'jev' : 'fake'
   // The report goes to stdout only; the run never touches the audit file.
-  const report = await calibrate(cases, { judge, thresholds, repeat, env: io.env })
+  const report = await calibrate(cases, { judge, thresholds, repeat, env: io.env, sendScripts: values['send-scripts'] ?? false })
   io.stdout(values.json ? `${JSON.stringify({ judge: label, ...report }, null, 2)}\n` : formatReport(report, { judge: label }))
   return 0
 }
@@ -96,6 +97,7 @@ const OPTIONS = {
   thresholds: { type: 'string' },
   repeat: { type: 'string' },
   json: { type: 'boolean' },
+  'send-scripts': { type: 'boolean' },
   'base-url': { type: 'string' },
   model: { type: 'string' },
   'api-key-env': { type: 'string' },

@@ -1,8 +1,9 @@
+import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { JsonlAuditSink } from './audit.js'
 import { JudgeCore } from './core.js'
-import { DEFAULT_THRESHOLD, Gate, registerGate, type GateExec } from './gate.js'
+import { DEFAULT_THRESHOLD, Gate, registerGate, type GateCallContext, type GateExec } from './gate.js'
 import { JEV_DEFAULTS, JevJudge } from './judge/jev.js'
 
 export const name = 'dsh-jev'
@@ -29,6 +30,8 @@ export interface Config {
   gate?: {
     /** Every Noul answer must reach this to auto-approve. */
     threshold?: number
+    /** Send package.json Script bodies to the Judge (off the machine). They are always checked locally either way. */
+    sendScripts?: boolean
   }
 }
 
@@ -50,11 +53,11 @@ export const Config: z<Config> = z.object({
       timeoutMs: z.number().default(JEV_DEFAULTS.timeoutMs),
     })
     .default({}),
-  gate: z.object({ threshold: z.number().min(0).max(1).default(DEFAULT_THRESHOLD) }).default({}),
+  gate: z.object({ threshold: z.number().min(0).max(1).default(DEFAULT_THRESHOLD), sendScripts: z.boolean().default(false) }).default({}),
 }) as never
 
 /** Best effort: latest human task and cwd from the calling agent's session; empty when the shape is unfamiliar. */
-export function sessionContext(exec: GateExec): { task?: string; project?: string } {
+export function sessionContext(exec: GateExec): GateCallContext {
   try {
     const session = (exec.agent as any)?.session
     const cwd: unknown = session?.header?.cwd
@@ -67,7 +70,8 @@ export function sessionContext(exec: GateExec): { task?: string; project?: strin
       if (text) texts.push(text)
     }
     const task = texts.length ? texts.slice(-3).join('\n---\n') : undefined
-    return { task, project: typeof cwd === 'string' ? cwd.split('/').filter(Boolean).pop() : undefined }
+    if (typeof cwd !== 'string') return { task, project: undefined }
+    return { task, project: cwd.split('/').filter(Boolean).pop(), ...(isAbsolute(cwd) ? { projectDir: cwd } : {}) }
   } catch {
     return {}
   }
@@ -92,5 +96,5 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
   const core = new JudgeCore({ judge: new JevJudge({ ...jev, resolveKey }), audit: new JsonlAuditSink() })
-  registerGate(ctx as never, new Gate({ core, threshold: config.gate?.threshold, context: sessionContext }))
+  registerGate(ctx as never, new Gate({ core, threshold: config.gate?.threshold, sendScripts: config.gate?.sendScripts, context: sessionContext }))
 }
