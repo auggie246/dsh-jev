@@ -10,6 +10,8 @@ export interface AskRequest<Q extends Record<string, Question>> {
   questions: Q
   /** Names the action taken, for the audit record. */
   decide?: (result: JudgeResult<Q>) => string
+  /** Non-sensitive facts recorded in the audit line (sizes, never content). */
+  meta?: Record<string, string | number | boolean>
 }
 
 export interface JudgeCoreOptions {
@@ -49,6 +51,7 @@ export class JudgeCore {
       decision: this.decisionOf(req, result),
       latencyMs: result.latencyMs,
       ...(result.status === 'ok' && result.usage ? { usage: result.usage } : {}),
+      ...(req.meta ? { meta: req.meta } : {}),
     }
     try {
       await this.opts.audit.write(record)

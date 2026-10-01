@@ -75,6 +75,7 @@ export class Gate {
         state: { commands: describe(exec.name, args), project: ctx.project ?? '', task: ctx.task ?? '' },
         fields: ['commands', 'project', 'task'],
         questions: QUESTIONS,
+        meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
       })
       if (result.status === 'ok' && this.confident(result.answers)) {

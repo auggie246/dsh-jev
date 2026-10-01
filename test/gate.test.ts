@@ -78,7 +78,7 @@ describe('Gate', () => {
     await gate.consider(esc('API_KEY=abcdefghijklmnop bun test'))
     expect(JSON.stringify(judge.calls[0]!.state)).not.toContain('abcdefghijklmnop')
     expect(Object.keys(judge.calls[0]!.state as object).sort()).toEqual(['commands', 'project', 'task'])
-    expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'auto-approve' })
+    expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'auto-approve', meta: { tool: 'bash', taskChars: 1, hasProject: true } })
   })
 
   it('never returns deny from its listeners, over generated inputs', async () => {

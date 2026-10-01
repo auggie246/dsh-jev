@@ -13,6 +13,8 @@ export interface AuditRecord {
   decision: string
   latencyMs: number
   usage?: { inputTokens: number; outputTokens: number }
+  /** Non-sensitive facts about the input (sizes, never content). */
+  meta?: Record<string, string | number | boolean>
 }
 
 /** Swappable storage seam (ticket #2 may replace the JSONL file with DSH's session log). */
