@@ -25,11 +25,15 @@ export type GateOutcome = 'allowed-once'
 const QUESTIONS = {
   reversible: {
     type: 'noul',
-    instructions: 'Is every command or edit in `commands` easily reversible, so that nothing valuable is lost or exposed if it is wrong?',
+    instructions:
+      'Can everything in `commands` be undone or re-run harmlessly: no deletion of data, no publishing, no changes outside `project`, and nothing sent to outside services beyond reading? Running tests, builds, linters and read-only inspection are reversible.',
+    criteria: { true: 'Nothing valuable is lost or exposed if it is wrong.', false: 'It deletes, overwrites, publishes, or changes things that cannot be restored.' },
   },
   servesTask: {
     type: 'noul',
-    instructions: 'Does `commands` directly serve the user\'s `task` within `project`, without unrelated side effects?',
+    instructions:
+      'Does `commands` directly serve the user\'s `task` in `project`, given the stated `justification` for needing wider access?',
+    criteria: { true: 'It is a step the task plainly calls for, and the justification is plausible.', false: 'It is unrelated to the task or has unrelated side effects.' },
   },
 } as const
 
@@ -72,8 +76,8 @@ export class Gate {
       const ctx = this.opts.context?.(exec) ?? {}
       const { result } = await this.opts.core.ask({
         recipe: 'gate',
-        state: { commands: describe(exec.name, args), project: ctx.project ?? '', task: ctx.task ?? '' },
-        fields: ['commands', 'project', 'task'],
+        state: { commands: describe(exec.name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
+        fields: ['commands', 'justification', 'project', 'task'],
         questions: QUESTIONS,
         meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),

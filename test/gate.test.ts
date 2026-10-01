@@ -71,13 +71,13 @@ describe('Gate', () => {
     expect(judge.calls).toHaveLength(0)
   })
 
-  it('sends only redacted commands, project and task, and audits the decision', async () => {
+  it('sends only redacted commands, justification, project and task, and audits the decision', async () => {
     const judge = new FakeJudge().script(yes(1, 1))
     const audit = new MemoryAuditSink()
     const gate = new Gate({ core: new JudgeCore({ judge, audit, env: {} }), context: () => ({ task: 't', project: 'p' }) })
     await gate.consider(esc('API_KEY=abcdefghijklmnop bun test'))
     expect(JSON.stringify(judge.calls[0]!.state)).not.toContain('abcdefghijklmnop')
-    expect(Object.keys(judge.calls[0]!.state as object).sort()).toEqual(['commands', 'project', 'task'])
+    expect(Object.keys(judge.calls[0]!.state as object).sort()).toEqual(['commands', 'justification', 'project', 'task'])
     expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'auto-approve', meta: { tool: 'bash', taskChars: 1, hasProject: true } })
   })
 
