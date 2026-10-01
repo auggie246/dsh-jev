@@ -1,5 +1,6 @@
 /** Gate Recipe (ADR 0003, 0005): approves sandbox escalations a Judge is confident about; never denies. */
 import type { JudgeCore } from './core.js'
+import { redactText } from './egress.js'
 import { assessCall } from './risk.js'
 
 export const GATED_TOOLS = new Set(['bash', 'pwsh', 'write', 'edit', 'str_replace_editor'])
@@ -47,6 +48,9 @@ function describe(name: string, args: Record<string, unknown>): string {
   return `${name} ${cmd}${path ?? ''}${body ? `\n${body}` : ''}`
 }
 
+/** Short redacted preview for the local audit line. */
+const preview = (name: string, args: Record<string, unknown>) => redactText(describe(name, args)).slice(0, 160)
+
 export interface GateOptions {
   core: JudgeCore
   threshold?: number
@@ -69,14 +73,19 @@ export class Gate {
       const args = exec.arguments
       // Only sandbox escalations prompt in stock DSH (spike #2); everything else is out of scope.
       if (!isObj(args) || args.sandbox_permissions === undefined) return
-      if (assessCall(exec.name, args).risky) return
+      const risk = assessCall(exec.name, args)
+      if (risk.risky) {
+        // Short-circuit to the normal prompt; recorded (with a short redacted preview) so skipped escalations stay visible.
+        await this.opts.core.note({ recipe: 'gate', decision: `risk-list:${risk.reason ?? 'risky'}`, meta: { tool: exec.name, parent: exec.parent !== undefined, preview: preview(exec.name, args) } })
+        return
+      }
       const ctx = this.opts.context?.(exec) ?? {}
       const { result } = await this.opts.core.ask({
         recipe: 'gate',
         state: { commands: describe(exec.name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
         fields: ['commands', 'justification', 'project', 'task'],
         questions: QUESTIONS,
-        meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length },
+        meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, preview: preview(exec.name, args) },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
       })
       if (result.status === 'ok' && this.confident(result.answers)) {

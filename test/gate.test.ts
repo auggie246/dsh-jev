@@ -65,6 +65,15 @@ describe('Gate', () => {
     expect(gate.answer(req())).toBeUndefined()
   })
 
+  it('audits risk-list stops with a redacted preview only', async () => {
+    const { gate, audit } = setup()
+    await gate.consider(esc('API_KEY=secret-value-123 rm -rf x'))
+    expect(audit.records).toHaveLength(1)
+    expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'risk-list:recursive delete', questionIds: [] })
+    expect(JSON.stringify(audit.records[0])).not.toContain('secret-value-123')
+    expect((audit.records[0]!.meta as any).preview).toContain('rm -rf x')
+  })
+
   it('ignores calls that are not escalations or not covered tools', async () => {
     const { gate, judge } = setup()
     judge.script(yes(1, 1))

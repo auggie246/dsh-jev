@@ -61,6 +61,23 @@ export class JudgeCore {
     return { result }
   }
 
+  /** Audit a decision made without a Judgment (e.g. the static risk list). Never throws; carries no content. */
+  async note(entry: { recipe: string; decision: string; meta?: AuditRecord['meta'] }): Promise<void> {
+    try {
+      await this.opts.audit.write({
+        ts: new Date().toISOString(),
+        recipe: entry.recipe,
+        questionIds: [],
+        probabilities: {},
+        decision: entry.decision,
+        latencyMs: 0,
+        ...(entry.meta ? { meta: entry.meta } : {}),
+      })
+    } catch {
+      /* audit is best effort */
+    }
+  }
+
   private decisionOf<Q extends Record<string, Question>>(req: AskRequest<Q>, result: JudgeResult<Q>): string {
     if (result.status === 'unavailable') return `unavailable:${result.reason}`
     try {
