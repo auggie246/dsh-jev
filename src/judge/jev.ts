@@ -22,6 +22,8 @@ export interface JevConfig {
   /** Injectable for tests. */
   fetch?: typeof fetch
   env?: Record<string, string | undefined>
+  /** Preferred key source (e.g. DSH's credential store); falls back to `env[apiKeyEnv]`. */
+  resolveKey?: () => Promise<string | undefined>
 }
 
 export const JEV_DEFAULTS = {
@@ -79,9 +81,10 @@ function parseAnswer(id: string, q: Question, raw: unknown): Answer {
 }
 
 export class JevJudge implements Judge {
-  readonly config: Required<Omit<JevConfig, 'fetch' | 'env'>>
+  readonly config: Required<Omit<JevConfig, 'fetch' | 'env' | 'resolveKey'>>
   private readonly fetchImpl: typeof fetch
   private readonly env: Record<string, string | undefined>
+  private readonly resolveKey?: () => Promise<string | undefined>
 
   constructor(cfg: Partial<JevConfig> = {}) {
     this.config = {
@@ -92,6 +95,7 @@ export class JevJudge implements Judge {
     }
     this.fetchImpl = cfg.fetch ?? fetch
     this.env = cfg.env ?? process.env
+    this.resolveKey = cfg.resolveKey
   }
 
   async judge<Q extends Record<string, Question>>(req: JudgeRequest<Q>): Promise<JudgeResult<Q>> {
@@ -103,7 +107,7 @@ export class JevJudge implements Judge {
       latencyMs: Math.round(performance.now() - start),
     })
     try {
-      const key = this.env[this.config.apiKeyEnv]
+      const key = (await this.resolveKey?.().catch(() => undefined)) || this.env[this.config.apiKeyEnv]
       if (!key) return unavailable('no-key', `${this.config.apiKeyEnv} is not set`)
 
       const ctrl = new AbortController()

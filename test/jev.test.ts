@@ -148,6 +148,15 @@ describe('JevJudge unavailable results (never throws)', () => {
     expect(res).toMatchObject({ status: 'unavailable', reason: 'timeout' })
   })
 
+  it('prefers a key from resolveKey (DSH credential store) over env, and survives it throwing', async () => {
+    const a = make(() => json(respFixture), { resolveKey: async () => 'sk-store' })
+    await a.judge.judge(request())
+    expect((a.seen[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk-store')
+    const b = make(() => json(respFixture), { resolveKey: async () => { throw new Error('boom') } })
+    await b.judge.judge(request())
+    expect((b.seen[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk-test')
+  })
+
   it('missing API key is unavailable without calling fetch', async () => {
     const { judge, seen } = make(() => json(respFixture), { env: {} })
     expect(await judge.judge(request())).toMatchObject({ status: 'unavailable', reason: 'no-key' })

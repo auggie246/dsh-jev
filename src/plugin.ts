@@ -75,6 +75,8 @@ export function sessionContext(exec: GateExec): { task?: string; project?: strin
 export function apply(ctx: Context, config: Config): void {
   if (!config.recipes?.gate) return
   const jev = { ...JEV_DEFAULTS, ...config.jev }
-  const core = new JudgeCore({ judge: new JevJudge(jev), audit: new JsonlAuditSink() })
+  // DSH keeps keys in its credential store (env wins there, then ~/.dsh/.credentials.yaml), not in process.env.
+  const resolveKey = async () => (await (ctx as any).credentials?.resolve(jev.apiKeyEnv))?.value as string | undefined
+  const core = new JudgeCore({ judge: new JevJudge({ ...jev, resolveKey }), audit: new JsonlAuditSink() })
   registerGate(ctx as never, new Gate({ core, threshold: config.gate?.threshold, context: sessionContext }))
 }
