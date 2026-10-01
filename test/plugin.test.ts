@@ -30,7 +30,7 @@ describe('plugin entry', () => {
 
 describe('gate wiring', () => {
   it('declares the credentials service so the key can be read from the DSH store', () => {
-    expect(inject).toEqual({ optional: ['credentials'] })
+    expect(inject).toEqual(['credentials'])
   })
 
   it('registers exactly the two prepended listeners when the Gate is enabled', () => {

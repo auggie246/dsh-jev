@@ -7,8 +7,8 @@ import { JEV_DEFAULTS, JevJudge } from './judge/jev.js'
 
 export const name = 'dsh-jev'
 
-/** Cordis only exposes `ctx.credentials` to plugins that declare it; optional so env keys still work without it. */
-export const inject = { optional: ['credentials'] }
+/** Cordis only exposes `ctx.credentials` to plugins that declare it. */
+export const inject = ['credentials']
 
 export interface Config {
   /** Per-Recipe opt-in (Egress rule: nothing leaves the machine until enabled). */
