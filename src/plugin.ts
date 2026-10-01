@@ -7,6 +7,9 @@ import { JEV_DEFAULTS, JevJudge } from './judge/jev.js'
 
 export const name = 'dsh-jev'
 
+/** Cordis only exposes `ctx.credentials` to plugins that declare it; optional so env keys still work without it. */
+export const inject = { optional: ['credentials'] }
+
 export interface Config {
   /** Per-Recipe opt-in (Egress rule: nothing leaves the machine until enabled). */
   recipes?: {
@@ -76,7 +79,16 @@ export function apply(ctx: Context, config: Config): void {
   if (!config.recipes?.gate) return
   const jev = { ...JEV_DEFAULTS, ...config.jev }
   // DSH keeps keys in its credential store (env wins there, then ~/.dsh/.credentials.yaml), not in process.env.
-  const resolveKey = async () => (await (ctx as any).credentials?.resolve(jev.apiKeyEnv))?.value as string | undefined
+  let warned = false
+  const resolveKey = async () => {
+    try {
+      return (await (ctx as any).credentials.resolve(jev.apiKeyEnv))?.value as string | undefined
+    } catch (e) {
+      if (!warned) console.warn(`dsh-jev: credential store lookup for ${jev.apiKeyEnv} failed: ${e instanceof Error ? e.message : String(e)}`)
+      warned = true
+      return undefined
+    }
+  }
   const core = new JudgeCore({ judge: new JevJudge({ ...jev, resolveKey }), audit: new JsonlAuditSink() })
   registerGate(ctx as never, new Gate({ core, threshold: config.gate?.threshold, context: sessionContext }))
 }

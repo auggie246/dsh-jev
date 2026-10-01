@@ -6,4 +6,4 @@ export { JsonlAuditSink, MemoryAuditSink, auditDir, type AuditRecord, type Audit
 export { JudgeCore, type AskRequest, type JudgeCoreOptions } from './core.js'
 export { assessCall, assessCommand, type Risk } from './risk.js'
 export { Gate, registerGate, GATED_TOOLS, DEFAULT_THRESHOLD, type GateExec, type GateApprovalRequest, type GateOptions } from './gate.js'
-export { name, Config, apply } from './plugin.js'
+export { name, inject, Config, apply } from './plugin.js'

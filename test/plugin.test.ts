@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Config, apply, name } from '../src/plugin.js'
+import { Config, apply, inject, name } from '../src/plugin.js'
 
 describe('plugin entry', () => {
   it('exports loader metadata and a schema with every Recipe off by default', () => {
@@ -29,6 +29,10 @@ describe('plugin entry', () => {
 })
 
 describe('gate wiring', () => {
+  it('declares the credentials service so the key can be read from the DSH store', () => {
+    expect(inject).toEqual({ optional: ['credentials'] })
+  })
+
   it('registers exactly the two prepended listeners when the Gate is enabled', () => {
     const reg: Array<[string, unknown]> = []
     const ctx = { on: (e: string, _l: unknown, o: unknown) => reg.push([e, o]) }
