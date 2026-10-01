@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Config, apply, inject, name } from '../src/plugin.js'
+import { Config, apply, inject, name, sessionContext } from '../src/plugin.js'
 
 describe('plugin entry', () => {
   it('exports loader metadata and a schema with every Recipe off by default', () => {
@@ -42,5 +42,19 @@ describe('gate wiring', () => {
 
   it('defaults the threshold to 0.9', () => {
     expect((Config({}) as any).gate.threshold).toBe(0.9)
+  })
+})
+
+describe('sessionContext', () => {
+  const msg = (text: string, kind = 'user') => ({ type: 'user/message', data: { source: { kind }, content: [{ type: 'text', text }] } })
+  const exec = (events: unknown[]) => ({ name: 'bash', callId: 'c', arguments: {}, agent: { session: { header: { cwd: '/a/b/proj' }, snapshotEvents: () => events } } })
+
+  it('keeps the last three human messages so a short follow-up does not hide the task', () => {
+    const ctx = sessionContext(exec([msg('one'), msg('Run the whole test suite'), msg('tool', 'tool'), msg('yes'), msg('go ahead')]) as never)
+    expect(ctx).toEqual({ task: 'Run the whole test suite\n---\nyes\n---\ngo ahead', project: 'proj' })
+  })
+
+  it('returns an empty context for an unfamiliar session shape', () => {
+    expect(sessionContext({ name: 'bash', callId: 'c', arguments: {}, agent: {} } as never)).toEqual({ task: undefined, project: undefined })
   })
 })

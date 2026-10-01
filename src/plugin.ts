@@ -59,12 +59,14 @@ export function sessionContext(exec: GateExec): { task?: string; project?: strin
     const session = (exec.agent as any)?.session
     const cwd: unknown = session?.header?.cwd
     const events: any[] = session?.snapshotEvents?.() ?? []
-    let task: string | undefined
+    // The latest message alone may be a short follow-up ("go ahead"), so keep the last few human messages.
+    const texts: string[] = []
     for (const e of events) {
       if (e?.type !== 'user/message' || e.data?.source?.kind !== 'user') continue
       const text = (e.data.content as any[] | undefined)?.filter((b) => b?.type === 'text').map((b) => b.text).join('\n')
-      if (text) task = text
+      if (text) texts.push(text)
     }
+    const task = texts.length ? texts.slice(-3).join('\n---\n') : undefined
     return { task, project: typeof cwd === 'string' ? cwd.split('/').filter(Boolean).pop() : undefined }
   } catch {
     return {}
