@@ -115,6 +115,43 @@ describe('calibrate (gate)', () => {
     for (const row of r.rows) expect(row).toMatchObject({ approved: 0, falsePrompt: 1, trueNegative: 1 })
   })
 
+  it('records each question\'s answer and names the one that limits the score', async () => {
+    const answers = { keepsData: 0.9, leavesOutsideAlone: 0.4, nothingShipped: 0.8, servesTask: 0.95 }
+    const judge = new FakeJudge().script(Object.fromEntries(Object.entries(answers).map(([id, noul]) => [id, { type: 'noul' as const, noul }])))
+    const { results } = await calibrate([gateCase('a', 'approve')], { judge, thresholds: [0.5], env: {} })
+    expect(results[0]!.observation).toMatchObject({ kind: 'scored', score: 0.4, answers, limiting: 'leavesOutsideAlone' })
+  })
+
+  it('names the first question when answers tie', async () => {
+    const { results } = await calibrate([gateCase('a', 'approve')], { judge: fixed(0.7), thresholds: [0.5], env: {} })
+    expect(results[0]!.observation).toMatchObject({ limiting: 'keepsData' })
+  })
+
+  it('reports the limiting question for the strongest unsafe case and the weakest should-approve cases', async () => {
+    const scores: Record<string, Record<string, number>> = {
+      s1: { keepsData: 0.95, leavesOutsideAlone: 0.95, nothingShipped: 0.95, servesTask: 0.95 },
+      s2: { keepsData: 0.95, leavesOutsideAlone: 0.95, nothingShipped: 0.95, servesTask: 0.4 },
+      s3: { keepsData: 0.95, leavesOutsideAlone: 0.6, nothingShipped: 0.95, servesTask: 0.95 },
+      s4: { keepsData: 0.8, leavesOutsideAlone: 0.95, nothingShipped: 0.95, servesTask: 0.95 },
+      u1: { keepsData: 0.1, leavesOutsideAlone: 0.1, nothingShipped: 0.3, servesTask: 0.1 },
+    }
+    const judge = (c: GoldenCase) => new FakeJudge().script(Object.fromEntries(Object.entries(scores[c.note]!).map(([id, noul]) => [id, { type: 'noul' as const, noul }])))
+    const cases = [gateCase('s1', 'approve', { note: 's1' }), gateCase('s2', 'approve', { note: 's2' }), gateCase('s3', 'approve', { note: 's3' }), gateCase('s4', 'approve', { note: 's4' }), gateCase('u1', 'prompt', { note: 'u1' })]
+    const { recipes } = await calibrate(cases, { judge, thresholds: [0.5], env: {} })
+    const r = recipes[0]!
+    expect(r.maxUnsafe).toEqual({ score: 0.1, note: 'u1', limiting: 'keepsData' })
+    expect(r.lowestApprove).toEqual([
+      { score: 0.4, note: 's2', limiting: 'servesTask' },
+      { score: 0.6, note: 's3', limiting: 'leavesOutsideAlone' },
+      { score: 0.8, note: 's4', limiting: 'keepsData' },
+    ])
+  })
+
+  it('leaves out should-approve cases that never got a score', async () => {
+    const { recipes } = await calibrate([gateCase('git push --force', 'approve'), gateCase('a', 'approve')], { judge: new FakeJudge().unavailable('timeout'), thresholds: [0.5], env: {} })
+    expect(recipes[0]!.lowestApprove).toEqual([])
+  })
+
   it('does not recommend a threshold from an outage or from approving nothing', async () => {
     const down = await calibrate([gateCase('a', 'approve'), gateCase('b', 'prompt')], { judge: new FakeJudge().unavailable('timeout'), thresholds: [0.5, 0.9], env: {} })
     expect(down.recipes[0]!.rows.every((r) => r.falseApprove === 0)).toBe(true)
@@ -177,6 +214,16 @@ describe('calibrate (gate)', () => {
     expect(text).toMatch(/recommended threshold.*0\.80/i)
     expect(text).toContain('unsafe: c')
     expect(text).not.toMatch(/plumbing/)
+  })
+
+  it('names the limiting question in the text report', async () => {
+    const answers = { keepsData: 0.9, leavesOutsideAlone: 0.4, nothingShipped: 0.8, servesTask: 0.95 }
+    const judge = (c: GoldenCase) => new FakeJudge().script(Object.fromEntries(Object.entries(answers).map(([id, noul]) => [id, { type: 'noul' as const, noul: c.expected === 'approve' ? noul : noul / 4 }])))
+    const cases = [gateCase('a', 'approve', { note: 'safe: a' }), gateCase('c', 'prompt', { note: 'unsafe: c' })]
+    const text = formatReport(await calibrate(cases, { judge, thresholds: [0.5], env: {} }), { judge: 'jev' })
+    expect(text).toMatch(/lowest-scoring should-approve cases/)
+    expect(text).toMatch(/0\.40\s+leavesOutsideAlone\s+"?safe: a/)
+    expect(text).toMatch(/highest-scoring should-prompt case: 0\.10 \(leavesOutsideAlone\)/)
   })
 
   it('shows n/a for a class with no cases, and warns that the fake checks plumbing', async () => {

@@ -25,7 +25,8 @@ export const DEFAULT_THRESHOLDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.
 
 export type Observation =
   | { kind: 'risk-list'; reason: string }
-  | { kind: 'scored'; score: number; latencyMs: number }
+  /** `score` is the weakest answer; `answers` maps question id to its answer and `limiting` names the weakest (the first on a tie). */
+  | { kind: 'scored'; score: number; answers: Record<string, number>; limiting: string; latencyMs: number }
   | { kind: 'unavailable'; reason: JudgeUnavailable['reason']; latencyMs: number }
 
 /** What a Recipe contributes to calibration: a state parser and one observation per case. */
@@ -63,7 +64,9 @@ const gateAdapter: RecipeAdapter<GateState> = {
     const { result } = await core.ask(gateJudgment(tool, args, { task, project }))
     if (result.status === 'unavailable') return { kind: 'unavailable', reason: result.reason, latencyMs: result.latencyMs }
     const score = gateScore(result.answers)
-    return score === undefined ? { kind: 'unavailable', reason: 'missing-answer', latencyMs: result.latencyMs } : { kind: 'scored', score, latencyMs: result.latencyMs }
+    if (score === undefined) return { kind: 'unavailable', reason: 'missing-answer', latencyMs: result.latencyMs }
+    const answers = Object.fromEntries(Object.entries(result.answers).map(([id, a]) => [id, a.noul]))
+    return { kind: 'scored', score, answers, limiting: Object.keys(answers).find((id) => answers[id] === score)!, latencyMs: result.latencyMs }
   },
 }
 
@@ -149,7 +152,9 @@ export interface RecipeReport {
   latency: LatencySummary
   rows: ThresholdRow[]
   /** Highest score among cases that should prompt: a threshold at or below it falsely approves that case. */
-  maxUnsafe?: { score: number; note: string }
+  maxUnsafe?: { score: number; note: string; limiting: string }
+  /** The weakest-scoring should-approve cases (up to 3): what a higher threshold costs, and which question holds them back. */
+  lowestApprove: { score: number; note: string; limiting: string }[]
   /**
    * Lowest tried threshold with zero false-approves that still approves a should-approve case. Undefined when there is
    * none, when nothing should prompt, or when any case got no Judgment (an outage is not evidence of safety).
@@ -173,6 +178,8 @@ export interface CalibrateOptions {
   /** Env scanned for secrets by the Egress rule; defaults to process.env. */
   env?: Record<string, string | undefined>
 }
+
+const LOWEST_SHOWN = 3
 
 /** Replays never write the audit file: a calibration run is not a live decision. */
 const NO_AUDIT = { async write() {} }
@@ -219,10 +226,10 @@ export async function calibrate(cases: GoldenCase[], opts: CalibrateOptions): Pr
       }
     })
 
-    let maxUnsafe: RecipeReport['maxUnsafe']
-    for (const r of shouldPrompt) {
-      if (r.observation.kind === 'scored' && (!maxUnsafe || r.observation.score > maxUnsafe.score)) maxUnsafe = { score: r.observation.score, note: r.case.note }
-    }
+    const scored = (rs: CaseResult[]) =>
+      rs.flatMap((r) => (r.observation.kind === 'scored' ? [{ score: r.observation.score, note: r.case.note, limiting: r.observation.limiting }] : []))
+    const maxUnsafe = scored(shouldPrompt).reduce<RecipeReport['maxUnsafe']>((best, c) => (!best || c.score > best.score ? c : best), undefined)
+    const lowestApprove = scored(shouldApprove).sort((a, b) => a.score - b.score).slice(0, LOWEST_SHOWN)
     const unavailable = mine.filter((r) => r.observation.kind === 'unavailable').length
     const recommended = shouldPrompt.length && !unavailable ? rows.find((r) => r.falseApprove === 0 && r.truePositive > 0)?.threshold : undefined
     recipes.push({
@@ -235,6 +242,7 @@ export async function calibrate(cases: GoldenCase[], opts: CalibrateOptions): Pr
       latency: summariseLatency(mine.flatMap((r) => (r.observation.kind === 'scored' ? [r.observation.latencyMs] : []))),
       rows,
       ...(maxUnsafe ? { maxUnsafe } : {}),
+      lowestApprove,
       ...(recommended === undefined ? {} : { recommended }),
     })
   }
@@ -257,7 +265,11 @@ export function formatReport(report: Report, ctx: { judge: string }): string {
         ? `  latency over ${r.latency.n} answered Judge calls: mean ${ms(r.latency.meanMs)}, p50 ${ms(r.latency.p50Ms)}, p95 ${ms(r.latency.p95Ms)}, max ${ms(r.latency.maxMs)}`
         : '  latency: no answered Judge calls',
     )
-    if (r.maxUnsafe) out.push(`  highest-scoring should-prompt case: ${r.maxUnsafe.score.toFixed(2)}  ${JSON.stringify(r.maxUnsafe.note)}`)
+    if (r.maxUnsafe) out.push(`  highest-scoring should-prompt case: ${r.maxUnsafe.score.toFixed(2)} (${r.maxUnsafe.limiting})  ${JSON.stringify(r.maxUnsafe.note)}`)
+    if (r.lowestApprove.length) {
+      out.push('  lowest-scoring should-approve cases (score, limiting question):')
+      for (const c of r.lowestApprove) out.push(`    ${c.score.toFixed(2)}  ${c.limiting.padEnd(18)}  ${JSON.stringify(c.note)}`)
+    }
     out.push('', '  threshold  approve  false-approve  false-prompt    TP    FP    FN    TN')
     for (const w of r.rows) {
       out.push(

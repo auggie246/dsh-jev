@@ -79,7 +79,7 @@ describe('dsh-jev-calibrate', () => {
 
   it('limits the table to --thresholds', async () => {
     const { out } = await run([SEED, '--thresholds', '0.8,0.9'])
-    const rows = out.split('\n').filter((l) => /^\s+0\.\d\d\s/.test(l))
+    const rows = out.split('\n').filter((l) => /^\s+0\.\d\d\s+\d+\.\d%/.test(l))
     expect(rows).toHaveLength(2)
   })
 
