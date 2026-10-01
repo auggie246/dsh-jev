@@ -46,7 +46,7 @@ Verified in `web-test`: with every Recipe off the profile boots with no errors a
 
 ## Gate (issue #4)
 
-Enable with `recipes.gate: true` (optional `gate.threshold`, default 0.9). A prepended `tools/pre-execute` listener judges sandbox escalations (calls to `bash`, `pwsh`, `write`, `edit`, `str_replace_editor` and inner `run_code` calls that carry `sandbox_permissions`), after the static risk list; a prepended `approval/request` listener answers `allowed-once` only when all four narrow Noul answers (keeps data, leaves nothing outside the project, nothing shipped, serves the task) reach the threshold. It never denies; risk-list hits, low or missing scores and Judge failures leave DSH's normal prompt in place. Not yet verified in a live DSH session (see ADR 0005).
+Enable with `recipes.gate: true` (optional `gate.threshold`, default 0.9). A prepended `tools/pre-execute` listener judges sandbox escalations (calls to `bash`, `pwsh`, `write`, `edit`, `str_replace_editor` and inner `run_code` calls that carry `sandbox_permissions`), after the static risk list; a prepended `approval/request` listener answers `allowed-once` only when all four narrow Noul answers (keeps data, leaves nothing outside the project, nothing shipped, serves the task) reach the threshold. It never denies; risk-list hits, low or missing scores and Judge failures leave DSH's normal prompt in place. Verified in a live DSH session (see ADR 0005); tune `gate.threshold` on your own data, since Jev's scores for ordinary commands often sit between 0.75 and 0.95. Every escalation the Gate sees leaves one line in the audit file, including risk-list stops.
 
 ## Develop
 
