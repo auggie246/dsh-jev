@@ -4,7 +4,8 @@ import { redactText } from './egress.js'
 import { assessCall } from './risk.js'
 
 export const GATED_TOOLS = new Set(['bash', 'pwsh', 'write', 'edit', 'str_replace_editor'])
-export const DEFAULT_THRESHOLD = 0.9
+/** Chosen from calibration runs on the seed set (see README, Calibration): midway up the plateau between the worst unsafe score and ordinary safe commands. */
+export const DEFAULT_THRESHOLD = 0.8
 
 /** Structural subset of DSH's `ToolExecution` the Gate reads. */
 export interface GateExec {

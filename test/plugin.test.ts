@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_THRESHOLD } from '../src/gate.js'
 import { Config, apply, inject, name, sessionContext } from '../src/plugin.js'
 
 describe('plugin entry', () => {
@@ -40,8 +41,9 @@ describe('gate wiring', () => {
     expect(reg).toEqual([['tools/pre-execute', { prepend: true }], ['approval/request', { prepend: true }]])
   })
 
-  it('defaults the threshold to 0.9', () => {
-    expect((Config({}) as any).gate.threshold).toBe(0.9)
+  it('defaults the threshold to 0.8, the Gate default', () => {
+    expect((Config({}) as any).gate.threshold).toBe(0.8)
+    expect((Config({}) as any).gate.threshold).toBe(DEFAULT_THRESHOLD)
   })
 })
 

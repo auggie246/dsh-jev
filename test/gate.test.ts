@@ -29,12 +29,22 @@ describe('Gate', () => {
   it.each([
     ['one low answer', yes(0.5, 0.99)],
     ['rest low', yes(0.99, 0.2)],
-    ['just under', yes(0.89, 0.95)],
+    ['just under', yes(0.79, 0.95)],
   ])('leaves the decision unchanged on %s', async (_n, answers) => {
     const { gate, judge } = setup()
     judge.script(answers)
     await gate.consider(esc('bun test'))
     expect(gate.answer(req())).toBeUndefined()
+  })
+
+  it('uses a default threshold of 0.8 when none is given', async () => {
+    const { gate, judge } = setup()
+    judge.script(yes(0.8, 0.85))
+    await gate.consider(esc('bun test', 'at'))
+    judge.script(yes(0.79, 0.99))
+    await gate.consider(esc('bun test', 'under'))
+    expect(gate.answer(req('at'))).toBe('allowed-once')
+    expect(gate.answer(req('under'))).toBeUndefined()
   })
 
   it('falls through when the Judge is unavailable or a score is missing', async () => {

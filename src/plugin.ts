@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { JsonlAuditSink } from './audit.js'
 import { JudgeCore } from './core.js'
-import { Gate, registerGate, type GateExec } from './gate.js'
+import { DEFAULT_THRESHOLD, Gate, registerGate, type GateExec } from './gate.js'
 import { JEV_DEFAULTS, JevJudge } from './judge/jev.js'
 
 export const name = 'dsh-jev'
@@ -27,7 +27,7 @@ export interface Config {
     timeoutMs?: number
   }
   gate?: {
-    /** Both Noul answers must reach this to auto-approve. */
+    /** Every Noul answer must reach this to auto-approve. */
     threshold?: number
   }
 }
@@ -50,7 +50,7 @@ export const Config: z<Config> = z.object({
       timeoutMs: z.number().default(JEV_DEFAULTS.timeoutMs),
     })
     .default({}),
-  gate: z.object({ threshold: z.number().min(0).max(1).default(0.9) }).default({}),
+  gate: z.object({ threshold: z.number().min(0).max(1).default(DEFAULT_THRESHOLD) }).default({}),
 }) as never
 
 /** Best effort: latest human task and cwd from the calling agent's session; empty when the shape is unfamiliar. */
