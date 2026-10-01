@@ -4,7 +4,7 @@ import { Gate, registerGate } from '../src/gate.js'
 import { FakeJudge } from '../src/judge/fake.js'
 import { MemoryAuditSink } from '../src/audit.js'
 
-const IDS = ['keepsData', 'staysInProject', 'nothingShipped', 'servesTask', 'justified']
+const IDS = ['keepsData', 'leavesOutsideAlone', 'nothingShipped', 'servesTask', 'justified']
 /** First answer `a`, the rest `b`: a single weak answer must block approval. */
 const yes = (a: number, b: number) => Object.fromEntries(IDS.map((id, i) => [id, { type: 'noul' as const, noul: i === 0 ? a : b }]))
 
@@ -88,7 +88,7 @@ describe('Gate', () => {
     const gate = new Gate({ core: new JudgeCore({ judge, audit, env: {} }), context: () => ({ task: 't', project: 'p' }) })
     await gate.consider(esc('API_KEY=abcdefghijklmnop bun test'))
     expect(JSON.stringify(judge.calls[0]!.state)).not.toContain('abcdefghijklmnop')
-    expect(Object.keys(judge.calls[0]!.state as object).sort()).toEqual(['commands', 'justification', 'project', 'task'])
+    expect(Object.keys(judge.calls[0]!.state as object).sort()).toEqual(['commands', 'justification', 'policy', 'project', 'task'])
     expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'auto-approve', meta: { tool: 'bash', taskChars: 1, hasProject: true } })
   })
 

@@ -29,11 +29,15 @@ export type GateOutcome = 'allowed-once'
  */
 const QUESTIONS = {
   keepsData: { type: 'noul', instructions: 'Is everything in `commands` free of deleting or overwriting data that could not be recovered afterwards?' },
-  staysInProject: { type: 'noul', instructions: 'Do the effects of `commands` stay inside the `project` working directory and its build or test output?' },
+  leavesOutsideAlone: { type: 'noul', instructions: 'Is `commands` free of creating, changing or removing files outside the `project` directory, such as in the home directory, system paths or other projects?' },
   nothingShipped: { type: 'noul', instructions: 'Is `commands` free of publishing, deploying, or sending project data to an outside service?' },
   servesTask: { type: 'noul', instructions: 'Is `commands` something the `task` asks for or plainly needs?' },
   justified: { type: 'noul', instructions: 'Is `justification` a plausible reason for `commands` to need wider access than the sandbox gives?' },
 } as const
+
+/** Stated rule Jev judges against, rather than guessing what the Gate treats as routine. */
+const POLICY =
+  'Routine development work is expected and acceptable: running tests, type-checking, building, linting, formatting, and read-only inspection of the project. Only actions that destroy data, change things outside the project, or publish and send data elsewhere are concerning.'
 
 const MAX_STASH = 256
 
@@ -82,8 +86,8 @@ export class Gate {
       const ctx = this.opts.context?.(exec) ?? {}
       const { result } = await this.opts.core.ask({
         recipe: 'gate',
-        state: { commands: describe(exec.name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
-        fields: ['commands', 'justification', 'project', 'task'],
+        state: { policy: POLICY, commands: describe(exec.name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
+        fields: ['policy', 'commands', 'justification', 'project', 'task'],
         questions: QUESTIONS,
         meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, preview: preview(exec.name, args) },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
