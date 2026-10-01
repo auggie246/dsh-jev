@@ -8,7 +8,7 @@ import { FakeJudge } from '../src/judge/fake.js'
 /** Real Cordis waterfall ordering: our prepended listeners run before the stock answerer/decision. */
 async function run(noul: number) {
   const ctx = new Context() as any
-  const judge = new FakeJudge().script({ reversible: { type: 'noul', noul }, servesTask: { type: 'noul', noul } })
+  const judge = new FakeJudge().script(Object.fromEntries(['keepsData', 'staysInProject', 'nothingShipped', 'servesTask', 'justified'].map((id) => [id, { type: 'noul', noul }])))
   registerGate(ctx, new Gate({ core: new JudgeCore({ judge, audit: new MemoryAuditSink(), env: {} }) }))
   ctx.on('approval/request', async () => 'rejected') // stand-in for the user prompt
   const exec = { name: 'bash', callId: 'c1', arguments: { command: 'bun test', sandbox_permissions: 'danger-full-access', justification: 'net' } }

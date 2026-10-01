@@ -4,7 +4,9 @@ import { Gate, registerGate } from '../src/gate.js'
 import { FakeJudge } from '../src/judge/fake.js'
 import { MemoryAuditSink } from '../src/audit.js'
 
-const yes = (a: number, b: number) => ({ reversible: { type: 'noul' as const, noul: a }, servesTask: { type: 'noul' as const, noul: b } })
+const IDS = ['keepsData', 'staysInProject', 'nothingShipped', 'servesTask', 'justified']
+/** First answer `a`, the rest `b`: a single weak answer must block approval. */
+const yes = (a: number, b: number) => Object.fromEntries(IDS.map((id, i) => [id, { type: 'noul' as const, noul: i === 0 ? a : b }]))
 
 function setup(threshold?: number) {
   const judge = new FakeJudge()
@@ -25,8 +27,8 @@ describe('Gate', () => {
   })
 
   it.each([
-    ['low reversible', yes(0.5, 0.99)],
-    ['low serves', yes(0.99, 0.2)],
+    ['one low answer', yes(0.5, 0.99)],
+    ['rest low', yes(0.99, 0.2)],
     ['just under', yes(0.89, 0.95)],
   ])('leaves the decision unchanged on %s', async (_n, answers) => {
     const { gate, judge } = setup()
@@ -39,7 +41,7 @@ describe('Gate', () => {
     const { gate, judge } = setup()
     judge.unavailable('timeout')
     await gate.consider(esc('bun test', 'a'))
-    judge.script({ reversible: { type: 'noul', noul: 1 } } as never)
+    judge.script({ keepsData: { type: 'noul', noul: 1 } } as never)
     await gate.consider(esc('bun test', 'b'))
     expect(gate.answer(req('a'))).toBeUndefined()
     expect(gate.answer(req('b'))).toBeUndefined()

@@ -22,19 +22,16 @@ export interface GateApprovalRequest {
 
 export type GateOutcome = 'allowed-once'
 
+/**
+ * One narrow proposition per Noul (TypeSafe guidance); each is phrased so yes is the safe answer, and
+ * code approves only when every one reaches the threshold. Question ids are for code, not sent to Jev.
+ */
 const QUESTIONS = {
-  reversible: {
-    type: 'noul',
-    instructions:
-      'Can everything in `commands` be undone or re-run harmlessly: no deletion of data, no publishing, no changes outside `project`, and nothing sent to outside services beyond reading? Running tests, builds, linters and read-only inspection are reversible.',
-    criteria: { true: 'Nothing valuable is lost or exposed if it is wrong.', false: 'It deletes, overwrites, publishes, or changes things that cannot be restored.' },
-  },
-  servesTask: {
-    type: 'noul',
-    instructions:
-      'Does `commands` directly serve the user\'s `task` in `project`, given the stated `justification` for needing wider access?',
-    criteria: { true: 'It is a step the task plainly calls for, and the justification is plausible.', false: 'It is unrelated to the task or has unrelated side effects.' },
-  },
+  keepsData: { type: 'noul', instructions: 'Is everything in `commands` free of deleting or overwriting data that could not be recovered afterwards?' },
+  staysInProject: { type: 'noul', instructions: 'Do the effects of `commands` stay inside the `project` working directory and its build or test output?' },
+  nothingShipped: { type: 'noul', instructions: 'Is `commands` free of publishing, deploying, or sending project data to an outside service?' },
+  servesTask: { type: 'noul', instructions: 'Is `commands` something the `task` asks for or plainly needs?' },
+  justified: { type: 'noul', instructions: 'Is `justification` a plausible reason for `commands` to need wider access than the sandbox gives?' },
 } as const
 
 const MAX_STASH = 256
@@ -100,8 +97,9 @@ export class Gate {
     return 'allowed-once'
   }
 
-  private confident(answers: { reversible: { noul: number }; servesTask: { noul: number } }): boolean {
-    return answers.reversible.noul >= this.threshold && answers.servesTask.noul >= this.threshold
+  private confident(answers: Record<string, { noul: number }>): boolean {
+    const all = Object.values(answers)
+    return all.length === Object.keys(QUESTIONS).length && all.every((a) => a.noul >= this.threshold)
   }
 }
 
