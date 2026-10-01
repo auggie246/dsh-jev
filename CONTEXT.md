@@ -25,8 +25,12 @@ What state may leave the machine in a Judgment: secrets are redacted, protected 
 _Avoid_: Privacy setting
 
 **Static risk list**:
-The deterministic patterns (recursive delete, force push, privilege escalation, publish/deploy, credential files, shell-in-string) that always run before any Judgment and send a tool call straight to the normal prompt.
+The deterministic patterns (recursive delete, force push, privilege escalation, publish/deploy, sending data to another host, credential files, shell-in-string) that always run before any Judgment, over a command and the Script bodies it runs, and send a tool call straight to the normal prompt.
 _Avoid_: Blocklist, denylist
+
+**Script body**:
+The text a package-manager command will actually run, read locally from the project's scripts (the named script, its pre/post hooks, and one level of scripts it calls). It can only add evidence for a Judge or force a prompt; it never approves anything by itself.
+_Avoid_: Script contents, npm script
 
 **Gate**:
 The Recipe that lets a tool call skip the prompt only when a Judge is confident it is reversible and serves the task. It can allow; it never denies.
