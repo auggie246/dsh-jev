@@ -26,7 +26,7 @@ describe('dsh-jev-calibrate', () => {
     expect(code).toBe(0)
     expect(fetch).not.toHaveBeenCalled()
     expect(out).toContain('judge: fake')
-    expect(out).toMatch(/gate: 13 cases/)
+    expect(out).toMatch(/gate: 14 cases/)
     expect(out).toMatch(/recommended threshold at zero false-approves: 0\.85/)
   })
 
@@ -88,14 +88,14 @@ describe('dsh-jev-calibrate', () => {
     const { code, out } = await run([SEED, '--repeat', '3'], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
     expect(code).toBe(0)
     expect(fetch).toHaveBeenCalledTimes(36)
-    expect(out).toMatch(/gate: 13 cases × 3 runs/)
+    expect(out).toMatch(/gate: 14 cases × 3 runs/)
   })
 
   it('reports the number of runs in --json', async () => {
     const { out } = await run([SEED, '--repeat', '2', '--json'])
     const report = JSON.parse(out)
-    expect(report.recipes[0]).toMatchObject({ cases: 13, runs: 2 })
-    expect(report.results).toHaveLength(26)
+    expect(report.recipes[0]).toMatchObject({ cases: 14, runs: 2 })
+    expect(report.results).toHaveLength(28)
   })
 
   it('prints machine-readable output with --json', async () => {
@@ -103,8 +103,8 @@ describe('dsh-jev-calibrate', () => {
     expect(code).toBe(0)
     const report = JSON.parse(out)
     expect(report.judge).toBe('fake')
-    expect(report.recipes[0]).toMatchObject({ recipe: 'gate', cases: 13, recommended: 0.85 })
-    expect(report.results).toHaveLength(13)
+    expect(report.recipes[0]).toMatchObject({ recipe: 'gate', cases: 14, recommended: 0.85 })
+    expect(report.results).toHaveLength(14)
   })
 
   it.each([
