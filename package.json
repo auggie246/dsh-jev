@@ -13,15 +13,20 @@
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
+  "bin": {
+    "dsh-jev-calibrate": "./lib/calibrate-cli.js"
+  },
   "files": [
     "lib",
+    "golden",
     "cordis.patch.yml"
   ],
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "calibrate": "node lib/calibrate-cli.js"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.18.4"

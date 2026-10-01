@@ -1,5 +1,5 @@
 /** Gate Recipe (ADR 0003, 0005): approves sandbox escalations a Judge is confident about; never denies. */
-import type { JudgeCore } from './core.js'
+import type { AskRequest, JudgeCore } from './core.js'
 import { redactText } from './egress.js'
 import { assessCall } from './risk.js'
 
@@ -40,6 +40,12 @@ const POLICY =
 
 const MAX_STASH = 256
 
+/** Who the call is for; best effort, empty when unknown. */
+export interface GateCallContext {
+  task?: string
+  project?: string
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
 /** Text a Judge sees for a call (redaction and trimming happen in the Judge core). */
@@ -54,11 +60,27 @@ function describe(name: string, args: Record<string, unknown>): string {
 /** Short redacted preview for the local audit line. */
 const preview = (name: string, args: Record<string, unknown>) => redactText(describe(name, args)).slice(0, 160)
 
+/** The Judgment the Gate puts for one call. Shared with the calibration harness so replays send exactly what the Gate sends. */
+export function gateJudgment(name: string, args: Record<string, unknown>, ctx: GateCallContext): Pick<AskRequest<typeof QUESTIONS>, 'recipe' | 'state' | 'fields' | 'questions'> {
+  return {
+    recipe: 'gate',
+    state: { policy: POLICY, commands: describe(name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
+    fields: ['policy', 'commands', 'justification', 'project', 'task'],
+    questions: QUESTIONS,
+  }
+}
+
+/** The weakest Noul answer: the Gate approves only when this reaches the threshold. `undefined` when an answer is missing. */
+export function gateScore(answers: Record<string, { noul: number }>): number | undefined {
+  const all = Object.values(answers)
+  return all.length === Object.keys(QUESTIONS).length ? Math.min(...all.map((a) => a.noul)) : undefined
+}
+
 export interface GateOptions {
   core: JudgeCore
   threshold?: number
   /** Latest user task and project for the call; best effort, empty when unknown. */
-  context?: (exec: GateExec) => { task?: string; project?: string }
+  context?: (exec: GateExec) => GateCallContext
 }
 
 export class Gate {
@@ -84,10 +106,7 @@ export class Gate {
       }
       const ctx = this.opts.context?.(exec) ?? {}
       const { result } = await this.opts.core.ask({
-        recipe: 'gate',
-        state: { policy: POLICY, commands: describe(exec.name, args), justification: typeof args.justification === 'string' ? args.justification : '', project: ctx.project ?? '', task: ctx.task ?? '' },
-        fields: ['policy', 'commands', 'justification', 'project', 'task'],
-        questions: QUESTIONS,
+        ...gateJudgment(exec.name, args, ctx),
         meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, preview: preview(exec.name, args) },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
       })
@@ -110,8 +129,8 @@ export class Gate {
   }
 
   private confident(answers: Record<string, { noul: number }>): boolean {
-    const all = Object.values(answers)
-    return all.length === Object.keys(QUESTIONS).length && all.every((a) => a.noul >= this.threshold)
+    const score = gateScore(answers)
+    return score !== undefined && score >= this.threshold
   }
 }
 

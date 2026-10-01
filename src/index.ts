@@ -5,5 +5,6 @@ export { redactText, isProtectedPath, prepareState, type EgressOptions } from '.
 export { JsonlAuditSink, MemoryAuditSink, auditDir, type AuditRecord, type AuditSink } from './audit.js'
 export { JudgeCore, type AskRequest, type JudgeCoreOptions } from './core.js'
 export { assessCall, assessCommand, type Risk } from './risk.js'
-export { Gate, registerGate, GATED_TOOLS, DEFAULT_THRESHOLD, type GateExec, type GateApprovalRequest, type GateOptions } from './gate.js'
+export { Gate, registerGate, gateJudgment, gateScore, GATED_TOOLS, DEFAULT_THRESHOLD, type GateExec, type GateApprovalRequest, type GateCallContext, type GateOptions } from './gate.js'
+export { calibrate, parseGoldenSet, formatReport, fakeJudgeFor, DEFAULT_THRESHOLDS, type GoldenCase, type Expected, type Report, type RecipeReport, type ThresholdRow } from './calibrate.js'
 export { name, inject, Config, apply } from './plugin.js'
