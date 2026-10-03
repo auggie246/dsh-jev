@@ -159,10 +159,19 @@ describe('Gate', () => {
       expect(stateOf(judge)).not.toHaveProperty('scripts')
     })
 
-    it('sends no scripts field when sendScripts is off (the default), so the state matches today', async () => {
-      const { gate, judge } = await project({ pretest: 'tsc', test: 'vitest run' })
+    it('keeps the prompt without a Judgment when bodies are found but sendScripts is off (the default)', async () => {
+      const { gate, judge, audit } = await project({ pretest: 'tsc', test: 'vitest run' })
       await gate.consider(esc('npm test'))
-      expect(stateOf(judge)).toEqual(await baseline('npm test'))
+      expect(judge.calls).toHaveLength(0)
+      expect(gate.answer(req())).toBeUndefined()
+      expect(audit.records[0]).toMatchObject({ recipe: 'gate', decision: 'scripts-not-sent', questionIds: [], meta: { tool: 'bash', scripts: 2 } })
+    })
+
+    it('still judges a call that runs no package script when sendScripts is off, exactly as before', async () => {
+      const { gate, judge } = await project({ test: 'vitest run' })
+      await gate.consider(esc('git status'))
+      expect(stateOf(judge)).toEqual(await baseline('git status'))
+      expect(gate.answer(req())).toBe('allowed-once')
     })
 
     it('redacts tokens in script bodies before the Judge sees them', async () => {
@@ -202,14 +211,16 @@ describe('Gate', () => {
       ['malformed', '{nope'],
       ['oversized', JSON.stringify({ scripts: { test: 'rm -rf ~', pad: 'x'.repeat(1_100_000) } })],
       ['without the script', JSON.stringify({ scripts: { build: 'rm -rf ~' } })],
-    ])('leaves the Judgment as today with a %s package.json', async (_n, contents) => {
+    ])('leaves the Judgment as today with a %s package.json, whether or not scripts are sent', async (_n, contents) => {
       const root = await mkdtemp(join(tmpdir(), 'dsh-jev-gate-'))
       if (contents !== null) await writeFile(join(root, 'package.json'), contents)
-      const judge = new FakeJudge().script(yes(1, 1))
-      const gate = new Gate({ core: new JudgeCore({ judge, audit: new MemoryAuditSink(), env: {} }), sendScripts: true, context: () => ({ task: 't', project: 'p', projectDir: root }) })
-      await gate.consider(esc('npm test'))
-      expect(stateOf(judge)).toEqual(await baseline('npm test'))
-      expect(gate.answer(req())).toBe('allowed-once')
+      for (const sendScripts of [false, true]) {
+        const judge = new FakeJudge().script(yes(1, 1))
+        const gate = new Gate({ core: new JudgeCore({ judge, audit: new MemoryAuditSink(), env: {} }), sendScripts, context: () => ({ task: 't', project: 'p', projectDir: root }) })
+        await gate.consider(esc('npm test'))
+        expect(stateOf(judge)).toEqual(await baseline('npm test'))
+        expect(gate.answer(req())).toBe('allowed-once')
+      }
     })
 
     it('leaves the Judgment as today when the working directory cannot be resolved', async () => {

@@ -43,8 +43,8 @@ describe('dsh-jev-calibrate', () => {
     const { code, out } = await run([SEED], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
     expect(code).toBe(0)
     expect(out).toContain('judge: jev')
-    // 16 cases, three stopped by the risk list before any Judgment.
-    expect(fetch).toHaveBeenCalledTimes(13)
+    // 16 cases: three stopped by the risk list and one withheld (Script bodies not sent) before any Judgment.
+    expect(fetch).toHaveBeenCalledTimes(12)
     expect(fetch.mock.calls[0]![0]).toBe('https://api.typesafe.ai/v1/systemone')
     // Everything scored 1, so every should-prompt case is falsely approved at every threshold.
     expect(out).toMatch(/recommended threshold: none/)
@@ -84,7 +84,7 @@ describe('dsh-jev-calibrate', () => {
   it('counts an unreachable Jev as unavailable rather than failing the run', async () => {
     const { code, out } = await run([SEED, '--judge', 'jev'], { env: { TYPESAFE_API_KEY: 'k-123456789' } })
     expect(code).toBe(0)
-    expect(out).toMatch(/13 Judge unavailable/)
+    expect(out).toMatch(/12 Judge unavailable/)
   })
 
   it('limits the table to --thresholds', async () => {
@@ -97,7 +97,7 @@ describe('dsh-jev-calibrate', () => {
     const fetch = jevStub(1)
     const { code, out } = await run([SEED, '--repeat', '3'], { env: { TYPESAFE_API_KEY: 'k-123456789' }, fetch })
     expect(code).toBe(0)
-    expect(fetch).toHaveBeenCalledTimes(39)
+    expect(fetch).toHaveBeenCalledTimes(36)
     expect(out).toMatch(/gate: 16 cases × 3 runs/)
   })
 

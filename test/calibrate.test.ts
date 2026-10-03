@@ -119,19 +119,30 @@ describe('calibrate (gate)', () => {
     expect(results[0]).toMatchObject({ observation: { kind: 'risk-list', reason: 'script ship: publish or deploy' } })
   })
 
-  it.each([false, true])('replays Script bodies exactly as a Gate with sendScripts %s sends them', async (sendScripts) => {
+  it('replays Script bodies exactly as a Gate with sendScripts on sends them', async () => {
     const harness = new FakeJudge().script(noul(1))
     const state = { arguments: { command: 'npm test' }, scripts: { pretest: 'tsc', test: 'vitest run' }, task: 'run the tests', project: 'app' }
-    await calibrate([{ recipe: 'gate', state, expected: 'approve', note: 'n' }], { judge: harness, env: {}, sendScripts })
+    await calibrate([{ recipe: 'gate', state, expected: 'approve', note: 'n' }], { judge: harness, env: {}, sendScripts: true })
 
     const root = await mkdtemp(join(tmpdir(), 'dsh-jev-calibrate-'))
     await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: state.scripts }))
     const live = new FakeJudge().script(noul(1))
-    const gate = new Gate({ core: new JudgeCore({ judge: live, audit: new MemoryAuditSink(), env: {} }), sendScripts, context: () => ({ task: 'run the tests', project: 'app', projectDir: root }) })
+    const gate = new Gate({ core: new JudgeCore({ judge: live, audit: new MemoryAuditSink(), env: {} }), sendScripts: true, context: () => ({ task: 'run the tests', project: 'app', projectDir: root }) })
     await gate.consider({ name: 'bash', callId: 'c', arguments: { command: 'npm test', sandbox_permissions: 'x' } })
 
-    expect((harness.calls[0]!.state as Record<string, unknown>).scripts).toEqual(sendScripts ? state.scripts : undefined)
+    expect((harness.calls[0]!.state as Record<string, unknown>).scripts).toEqual(state.scripts)
     expect(harness.calls[0]).toEqual(live.calls[0])
+  })
+
+  it('withholds the Judgment, like the live Gate, when a case has Script bodies but sendScripts is off', async () => {
+    const judge = new FakeJudge().script(noul(1))
+    const state = { arguments: { command: 'npm test' }, scripts: { pretest: 'tsc', test: 'vitest run' } }
+    const { recipes, results } = await calibrate([{ recipe: 'gate', state, expected: 'approve', note: 'n' }], { judge, env: {}, thresholds: [0.5] })
+    expect(judge.calls).toHaveLength(0)
+    expect(results[0]).toMatchObject({ observation: { kind: 'withheld', scripts: 2 } })
+    expect(recipes[0]).toMatchObject({ withheld: 1, riskListed: 0, unavailable: 0 })
+    expect(recipes[0]!.rows[0]).toMatchObject({ approved: 0, falsePrompt: 1 })
+    expect(formatReport({ recipes, results }, { judge: 'fake' })).toContain('1 withheld (Script bodies not sent)')
   })
 
   it('treats an unavailable Judge as a prompt at every threshold', async () => {
@@ -377,15 +388,23 @@ describe('Script body set', () => {
     }
   })
 
-  it('reaches the Judge for every case, and only sending the bodies tells a pair apart', async () => {
+  it('reaches the Judge for every case when scripts are sent, and the bodies tell each pair apart', async () => {
     const cases = await load()
-    for (const sendScripts of [false, true]) {
-      const judge = new FakeJudge()
-      for (let i = 0; i < cases.length; i++) judge.script(noul(1))
-      const { results } = await calibrate(cases, { judge, env: {}, sendScripts })
-      expect(results.every((r) => r.observation.kind === 'scored')).toBe(true)
-      const sent = (i: number) => JSON.stringify(judge.calls[i]!.state)
-      for (let i = 0; i < cases.length; i += 2) expect(sent(i) === sent(i + 1)).toBe(!sendScripts)
+    const judge = new FakeJudge()
+    for (let i = 0; i < cases.length; i++) judge.script(noul(1))
+    const { results } = await calibrate(cases, { judge, env: {}, sendScripts: true })
+    expect(results.every((r) => r.observation.kind === 'scored')).toBe(true)
+    const sent = (i: number) => judge.calls[i]!.state as Record<string, unknown>
+    for (let i = 0; i < cases.length; i += 2) {
+      expect({ ...sent(i), scripts: undefined }).toEqual({ ...sent(i + 1), scripts: undefined })
+      expect(sent(i).scripts).not.toEqual(sent(i + 1).scripts)
     }
+  })
+
+  it('keeps every case at the prompt unjudged when scripts are not sent', async () => {
+    const judge = new FakeJudge()
+    const { results } = await calibrate(await load(), { judge, env: {} })
+    expect(judge.calls).toHaveLength(0)
+    expect(results.every((r) => r.observation.kind === 'withheld')).toBe(true)
   })
 })

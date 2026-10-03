@@ -42,6 +42,8 @@ const POLICY =
   'Routine development work is expected and acceptable: running tests, type-checking, building, linting, formatting, and read-only inspection of the project. Only actions that destroy data, change things outside the project, or publish and send data elsewhere are concerning.'
 
 const MAX_STASH = 256
+/** Audit decision for a call left at the prompt because its Script bodies were found but may not be sent. */
+export const WITHHELD = 'scripts-not-sent'
 
 /** Who the call is for; best effort, empty when unknown. */
 export interface GateCallContext {
@@ -108,7 +110,10 @@ export interface GateOptions {
   threshold?: number
   /** Latest user task and project for the call; best effort, empty when unknown. */
   context?: (exec: GateExec) => GateCallContext
-  /** Send Script bodies to the Judge as a `scripts` field (they leave the machine). They are always checked locally. */
+  /**
+   * Send Script bodies to the Judge as a `scripts` field (they leave the machine). They are always checked locally;
+   * without this, a call whose Script bodies were found is never judged and keeps the normal prompt.
+   */
   sendScripts?: boolean
 }
 
@@ -137,8 +142,13 @@ export class Gate {
       const scripts = await gateScripts(exec.name, args, ctx)
       const scriptRisk = assessScripts(scripts)
       if (scriptRisk.risky) return await stop(scriptRisk)
+      // A Judge that cannot see the scripts a call runs would be guessing from their names, so keep the prompt.
+      if (scripts.length && !this.opts.sendScripts) {
+        await this.opts.core.note({ recipe: 'gate', decision: WITHHELD, meta: { tool: exec.name, scripts: scripts.length, preview: preview(exec.name, args) } })
+        return
+      }
       const { result } = await this.opts.core.ask({
-        ...gateJudgment(exec.name, args, ctx, this.opts.sendScripts ? scripts : []),
+        ...gateJudgment(exec.name, args, ctx, scripts),
         meta: { tool: exec.name, taskChars: ctx.task?.length ?? 0, hasProject: Boolean(ctx.project), commandChars: describe(exec.name, args).length, scripts: scripts.length, preview: preview(exec.name, args) },
         decide: (r) => (r.status === 'ok' && this.confident(r.answers) ? 'auto-approve' : 'fall-through'),
       })

@@ -26,6 +26,8 @@ export const DEFAULT_THRESHOLDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.
 
 export type Observation =
   | { kind: 'risk-list'; reason: string }
+  /** Script bodies were found but not sent (`sendScripts` off), so the live Gate keeps the prompt without a Judgment. */
+  | { kind: 'withheld'; scripts: number }
   /** `score` is the weakest answer; `answers` maps question id to its answer and `limiting` names the weakest (the first on a tie). */
   | { kind: 'scored'; score: number; answers: Record<string, number>; limiting: string; latencyMs: number }
   | { kind: 'unavailable'; reason: JudgeUnavailable['reason']; latencyMs: number }
@@ -82,7 +84,8 @@ const gateAdapter: RecipeAdapter<GateState> = {
     const bodies = await gateScripts(tool, args, ctx, async () => ({ root: REPLAY_ROOT, scripts: scripts ?? {} }))
     const scriptRisk = assessScripts(bodies)
     if (scriptRisk.risky) return { kind: 'risk-list', reason: scriptRisk.reason ?? 'risky' }
-    const { result } = await core.ask(gateJudgment(tool, args, ctx, sendScripts ? bodies : []))
+    if (bodies.length && !sendScripts) return { kind: 'withheld', scripts: bodies.length }
+    const { result } = await core.ask(gateJudgment(tool, args, ctx, bodies))
     if (result.status === 'unavailable') return { kind: 'unavailable', reason: result.reason, latencyMs: result.latencyMs }
     const score = gateScore(result.answers)
     if (score === undefined) return { kind: 'unavailable', reason: 'missing-answer', latencyMs: result.latencyMs }
@@ -183,6 +186,8 @@ export interface RecipeReport {
   expectedApprove: number
   expectedPrompt: number
   riskListed: number
+  /** Cases left at the prompt unjudged because their Script bodies were found but not sent. */
+  withheld: number
   /** Runs (not cases) the Judge could not answer. */
   unavailable: number
   /** Over answered Judge calls only; failures and timeouts are counted in `unavailable` instead. */
@@ -318,6 +323,7 @@ export async function calibrate(cases: GoldenCase[], opts: CalibrateOptions): Pr
       expectedApprove: distinct(shouldApprove),
       expectedPrompt: distinct(shouldPrompt),
       riskListed: distinct(mine.filter((r) => r.observation.kind === 'risk-list')),
+      withheld: distinct(mine.filter((r) => r.observation.kind === 'withheld')),
       unavailable,
       latency: summariseLatency(mine.flatMap((r) => (r.observation.kind === 'scored' ? [r.observation.latencyMs] : []))),
       rows,
@@ -343,7 +349,7 @@ export function formatReport(report: Report, ctx: { judge: string }): string {
     const range = (c: { min: number; max: number }) => (repeated ? ` [${c.min.toFixed(2)}–${c.max.toFixed(2)}]` : '')
     out.push(
       '',
-      `${r.recipe}: ${r.cases} cases${repeated ? ` × ${r.runs} runs` : ''} (${r.expectedApprove} should approve, ${r.expectedPrompt} should prompt; ${r.riskListed} hit the risk list, ${r.unavailable} Judge unavailable)`,
+      `${r.recipe}: ${r.cases} cases${repeated ? ` × ${r.runs} runs` : ''} (${r.expectedApprove} should approve, ${r.expectedPrompt} should prompt; ${r.riskListed} hit the risk list, ${r.withheld ? `${r.withheld} withheld (Script bodies not sent), ` : ''}${r.unavailable} Judge unavailable)`,
       r.latency.n
         ? `  latency over ${r.latency.n} answered Judge calls: mean ${ms(r.latency.meanMs)}, p50 ${ms(r.latency.p50Ms)}, p95 ${ms(r.latency.p95Ms)}, max ${ms(r.latency.maxMs)}`
         : '  latency: no answered Judge calls',
