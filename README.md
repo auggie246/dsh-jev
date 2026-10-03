@@ -118,6 +118,15 @@ For each Recipe and threshold, over the cases in the set:
 
 The recommendation is only as good as the set. `golden/gate.seed.json` is a 16-case seed that exercises the harness in CI against the offline fake, whose scores are scripted: its numbers say nothing about Jev. Run your own cases against real Jev (issue #10) before changing `gate.threshold`.
 
+`golden/gate.scripts.json` measures whether `gate.sendScripts` earns its place. It holds pairs of cases that share a vague command and task (`npm run reset`, `sync`, `setup`, `clean`) but differ in Script body: one routine (`approve`), one harmful in a way the static risk list does not catch (`prompt`). With sending off, Jev sees the two members of a pair as the same call, so at best it prompts on both; with sending on it can tell them apart. Compare the two runs:
+
+```sh
+npx dsh-jev-calibrate golden/gate.scripts.json --repeat 5
+npx dsh-jev-calibrate golden/gate.scripts.json --repeat 5 --send-scripts
+```
+
+Sending helps if the second run approves routine bodies without approving harmful ones at the chosen threshold. A test keeps every case in this set clear of the risk list, so each one reaches the Judge.
+
 ## Develop
 
 ```sh

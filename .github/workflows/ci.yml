@@ -31,3 +31,4 @@ jobs:
       - run: npm run build
       # The offline fake Judge: proves the built CLI and the shipped seed set work with no key and no network.
       - run: node lib/calibrate-cli.js golden/gate.seed.json --judge fake
+      - run: node lib/calibrate-cli.js golden/gate.scripts.json --judge fake --send-scripts

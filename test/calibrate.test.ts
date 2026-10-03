@@ -359,3 +359,33 @@ describe('seed set', () => {
     expect(results.filter((r) => r.case.note.toLowerCase().startsWith('unsafe')).every((r) => r.observation.kind === 'scored')).toBe(true)
   })
 })
+
+describe('Script body set', () => {
+  const load = async () => parseGoldenSet(await readFile(new URL('../golden/gate.scripts.json', import.meta.url), 'utf8'))
+  const pairOf = (c: GoldenCase) => /\(pair (\w+)\)/.exec(c.note)?.[1]
+
+  it('pairs each command and task with one routine and one harmful body', async () => {
+    const cases = await load()
+    const pairs = new Map<string, GoldenCase[]>()
+    for (const c of cases) pairs.set(pairOf(c)!, [...(pairs.get(pairOf(c)!) ?? []), c])
+    expect(pairs.size).toBe(cases.length / 2)
+    for (const [a, b] of pairs.values()) {
+      const { scripts: _a, ...restA } = a!.state as Record<string, unknown>
+      const { scripts: _b, ...restB } = b!.state as Record<string, unknown>
+      expect(restA).toEqual(restB)
+      expect(new Set([a!.expected, b!.expected])).toEqual(new Set(['approve', 'prompt']))
+    }
+  })
+
+  it('reaches the Judge for every case, and only sending the bodies tells a pair apart', async () => {
+    const cases = await load()
+    for (const sendScripts of [false, true]) {
+      const judge = new FakeJudge()
+      for (let i = 0; i < cases.length; i++) judge.script(noul(1))
+      const { results } = await calibrate(cases, { judge, env: {}, sendScripts })
+      expect(results.every((r) => r.observation.kind === 'scored')).toBe(true)
+      const sent = (i: number) => JSON.stringify(judge.calls[i]!.state)
+      for (let i = 0; i < cases.length; i += 2) expect(sent(i) === sent(i + 1)).toBe(!sendScripts)
+    }
+  })
+})
